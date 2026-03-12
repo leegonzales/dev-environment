@@ -229,10 +229,20 @@ clone_repo "git@github.com:Dicklesworthstone/asupersync.git" \
 clone_repo "git@github.com:Dicklesworthstone/toon_rust.git" \
     "$HOME/Projects/leegonzales/toon_rust" "toon_rust"
 
-# CASS itself
+# CASS itself (Lee's fork — includes cass-monitor work)
 CASS_REPO="$HOME/Projects/leegonzales/cass"
-clone_repo "https://github.com/Dicklesworthstone/coding_agent_session_search.git" \
-    "$CASS_REPO" "CASS (coding_agent_session_search)"
+clone_repo "git@github.com:leegonzales/cass.git" \
+    "$CASS_REPO" "CASS (leegonzales/cass)"
+
+# Set up upstream remote for syncing with Dicklesworthstone's repo
+if [[ -d "$CASS_REPO" ]]; then
+    cd "$CASS_REPO"
+    if ! git remote | grep -q upstream; then
+        git remote add upstream https://github.com/Dicklesworthstone/coding_agent_session_search.git
+        ok "CASS upstream remote added"
+    fi
+    cd "$SCRIPT_DIR"
+fi
 
 if [[ -d "$CASS_REPO" ]]; then
     info "Building CASS from source..."

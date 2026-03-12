@@ -70,7 +70,7 @@ ls ~/.claude/skills/ | wc -l  # 30+ skills loaded
 
 | Repo | Destination | Purpose |
 |------|-------------|---------|
-| `Dicklesworthstone/coding_agent_session_search` | `~/Projects/leegonzales/cass` | CASS — cross-agent session search |
+| `leegonzales/cass` (fork of Dicklesworthstone) | `~/Projects/leegonzales/cass` | CASS — cross-agent session search + cass-monitor |
 | `Dicklesworthstone/frankensearch` | `~/Projects/leegonzales/frankensearch` | Hybrid local search (lexical + vector) |
 | `Dicklesworthstone/frankentui` | `~/Projects/leegonzales/frankentui` | Terminal UI kernel (Elm architecture) |
 | `Dicklesworthstone/franken_agent_detection` | `~/Projects/leegonzales/franken_agent_detection` | Coding agent tool detection |
