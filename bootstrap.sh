@@ -76,17 +76,15 @@ if ! command -v fabric &>/dev/null && [[ ! -f "$HOME/go/bin/fabric" ]]; then
 fi
 ok "fabric ready"
 
-# ── claude-guardrails ──────────────────────────────────────────────────
+# ── Rust nightly (needed for CASS and some deps) ──────────────────────
 
-if ! command -v claude-guardrails &>/dev/null && [[ ! -f "$HOME/.claude/guardrails/claude-guardrails" ]]; then
-    info "Installing claude-guardrails..."
-    if command -v pipx &>/dev/null; then
-        pipx install claude-guardrails 2>/dev/null || warn "claude-guardrails install via pipx failed — install manually"
-    else
-        pip3 install claude-guardrails 2>/dev/null || warn "claude-guardrails install failed — install manually"
+if command -v rustup &>/dev/null; then
+    if ! rustup toolchain list | grep -q nightly; then
+        info "Installing Rust nightly toolchain..."
+        rustup toolchain install nightly
     fi
+    ok "Rust nightly ready"
 fi
-ok "claude-guardrails ready"
 
 # ── Claude Code config ─────────────────────────────────────────────────
 
@@ -135,18 +133,29 @@ for plist in "$SCRIPT_DIR"/launchd/*.plist; do
 done
 ok "Launchd daemons installed"
 
-# ── AISkills ───────────────────────────────────────────────────────────
+# ── Helper: clone repo if missing ──────────────────────────────────────
 
-SKILLS_REPO="$HOME/Projects/leegonzales/AISkills"
-if [[ ! -d "$SKILLS_REPO" ]]; then
-    info "Cloning AISkills..."
-    mkdir -p "$HOME/Projects/leegonzales"
-    git clone git@github.com:leegonzales/AISkills.git "$SKILLS_REPO"
-fi
+clone_repo() {
+    local remote="$1" dest="$2" label="$3"
+    if [[ ! -d "$dest" ]]; then
+        info "Cloning $label..."
+        mkdir -p "$(dirname "$dest")"
+        git clone "$remote" "$dest" || { warn "Failed to clone $label"; return 1; }
+    fi
+    ok "$label ready"
+}
+
+# ── Tier 1: Core AI Agent Infrastructure ──────────────────────────────
+
+info "=== Tier 1: Core AI Agent Infrastructure ==="
+
+# AISkills
+clone_repo "git@github.com:leegonzales/AISkills.git" \
+    "$HOME/Projects/leegonzales/AISkills" "AISkills"
 
 # Symlink skills to ~/.claude/skills/
 if [[ ! -L "$HOME/.claude/skills" ]] && [[ ! -d "$HOME/.claude/skills" ]]; then
-    ln -s "$SKILLS_REPO" "$HOME/.claude/skills"
+    ln -s "$HOME/Projects/leegonzales/AISkills" "$HOME/.claude/skills"
     ok "Skills symlinked to ~/.claude/skills/"
 elif [[ -L "$HOME/.claude/skills" ]]; then
     ok "Skills symlink already exists"
@@ -154,28 +163,132 @@ else
     warn "~/.claude/skills/ exists as directory — skipping symlink (manual merge needed)"
 fi
 
-# ── claude-sandboxes ───────────────────────────────────────────────────
+# claude-sandboxes
+clone_repo "git@github.com:leegonzales/claude-sandboxes.git" \
+    "$HOME/Projects/claude-sandboxes" "claude-sandboxes"
 
-SANDBOX_REPO="$HOME/Projects/claude-sandboxes"
-if [[ ! -d "$SANDBOX_REPO" ]]; then
-    info "Cloning claude-sandboxes..."
-    git clone git@github.com:leegonzales/claude-sandboxes.git "$SANDBOX_REPO"
-fi
-ok "claude-sandboxes ready"
-
-# ── claude-speak ───────────────────────────────────────────────────────
-
+# claude-speak (with install script)
 SPEAK_REPO="$HOME/Projects/claude-speak"
 if [[ ! -d "$SPEAK_REPO" ]]; then
-    info "Cloning claude-speak..."
-    git clone git@github.com:leegonzales/claude-speak.git "$SPEAK_REPO"
+    clone_repo "git@github.com:leegonzales/claude-speak.git" \
+        "$SPEAK_REPO" "claude-speak"
     if [[ -f "$SPEAK_REPO/install.sh" ]]; then
         info "Running claude-speak installer..."
         cd "$SPEAK_REPO" && bash install.sh
         cd "$SCRIPT_DIR"
     fi
+else
+    ok "claude-speak ready"
 fi
-ok "claude-speak ready"
+
+# claude-guardrails (Rust binary — build from source)
+GUARDRAILS_REPO="$HOME/Projects/leegonzales/claude-guardrails"
+clone_repo "git@github.com:leegonzales/claude-guardrails.git" \
+    "$GUARDRAILS_REPO" "claude-guardrails"
+if [[ -d "$GUARDRAILS_REPO" ]] && ! command -v claude-guardrails &>/dev/null && [[ ! -f "$HOME/.claude/guardrails/claude-guardrails" ]]; then
+    info "Building claude-guardrails from source..."
+    cd "$GUARDRAILS_REPO"
+    if [[ -f "Cargo.toml" ]]; then
+        cargo build --release 2>/dev/null && \
+            cp target/release/claude-guardrails "$HOME/.claude/guardrails/claude-guardrails" && \
+            ok "claude-guardrails binary installed" || \
+            warn "claude-guardrails build failed — install manually"
+    elif [[ -f "install.sh" ]]; then
+        bash install.sh || warn "claude-guardrails install.sh failed"
+    else
+        warn "claude-guardrails: no Cargo.toml or install.sh found — install manually"
+    fi
+    cd "$SCRIPT_DIR"
+fi
+
+# claude-allowlist
+clone_repo "git@github.com:leegonzales/claude-allowlist.git" \
+    "$HOME/Projects/leegonzales/claude-allowlist" "claude-allowlist"
+
+# agent-orchestra
+clone_repo "git@github.com:leegonzales/agent-orchestra.git" \
+    "$HOME/Projects/leegonzales/agent-orchestra" "agent-orchestra"
+
+# ── Tier 2: CASS + Dependencies (build from source) ──────────────────
+
+info "=== Tier 2: CASS + Dependencies ==="
+
+# CASS dependency repos (must be cloned before CASS for local path resolution)
+clone_repo "git@github.com:Dicklesworthstone/frankensearch.git" \
+    "$HOME/Projects/leegonzales/frankensearch" "frankensearch"
+
+clone_repo "git@github.com:Dicklesworthstone/frankentui.git" \
+    "$HOME/Projects/leegonzales/frankentui" "frankentui (ftui)"
+
+clone_repo "git@github.com:Dicklesworthstone/franken_agent_detection.git" \
+    "$HOME/Projects/leegonzales/franken_agent_detection" "franken_agent_detection"
+
+clone_repo "git@github.com:Dicklesworthstone/asupersync.git" \
+    "$HOME/Projects/leegonzales/asupersync" "asupersync"
+
+clone_repo "git@github.com:Dicklesworthstone/toon_rust.git" \
+    "$HOME/Projects/leegonzales/toon_rust" "toon_rust"
+
+# CASS itself
+CASS_REPO="$HOME/Projects/leegonzales/cass"
+clone_repo "https://github.com/Dicklesworthstone/coding_agent_session_search.git" \
+    "$CASS_REPO" "CASS (coding_agent_session_search)"
+
+if [[ -d "$CASS_REPO" ]]; then
+    info "Building CASS from source..."
+    cd "$CASS_REPO"
+    # CASS requires nightly Rust and local path deps at ../frankentui, ../frankensearch, etc.
+    if cargo +nightly build --release 2>/dev/null; then
+        # Install binary to ~/.local/bin/
+        mkdir -p "$HOME/.local/bin"
+        cp target/release/cass "$HOME/.local/bin/cass" 2>/dev/null && \
+            ok "CASS binary installed to ~/.local/bin/cass" || \
+            warn "CASS binary copy failed"
+    else
+        warn "CASS build failed — may need nightly Rust or dependency fixes. Falling back to brew version."
+        info "  Brew CASS is still available as a fallback (installed via Brewfile)"
+    fi
+    cd "$SCRIPT_DIR"
+fi
+
+# ── Tier 3: MCP Servers ──────────────────────────────────────────────
+
+info "=== Tier 3: MCP Servers ==="
+
+# Google Workspace MCP
+GWS_MCP="$HOME/Projects/leegonzales/google-workspace-mcp"
+clone_repo "git@github.com:leegonzales/google-workspace-mcp.git" \
+    "$GWS_MCP" "google-workspace-mcp"
+if [[ -d "$GWS_MCP" ]] && [[ -f "$GWS_MCP/package.json" ]]; then
+    cd "$GWS_MCP" && npm install --silent 2>/dev/null && ok "google-workspace-mcp deps installed" || warn "npm install failed for google-workspace-mcp"
+    cd "$SCRIPT_DIR"
+fi
+
+# MCP Agent Mail
+AGENT_MAIL="$HOME/Projects/mcp_agent_mail"
+clone_repo "git@github.com:leegonzales/mcp_agent_mail.git" \
+    "$AGENT_MAIL" "mcp-agent-mail"
+if [[ -d "$AGENT_MAIL" ]] && [[ -f "$AGENT_MAIL/requirements.txt" ]]; then
+    cd "$AGENT_MAIL"
+    if [[ ! -d ".venv" ]]; then
+        python3 -m venv .venv && .venv/bin/pip install -r requirements.txt --quiet 2>/dev/null && \
+            ok "mcp-agent-mail venv ready" || warn "mcp-agent-mail venv setup failed"
+    else
+        ok "mcp-agent-mail venv already exists"
+    fi
+    cd "$SCRIPT_DIR"
+fi
+
+# HeyGen MCP (optional)
+clone_repo "git@github.com:leegonzales/heygen-mcp.git" \
+    "$HOME/Projects/leegonzales/heygen-mcp-fork" "heygen-mcp (optional)"
+
+# ── Tier 4: Reference ────────────────────────────────────────────────
+
+info "=== Tier 4: Reference ==="
+
+clone_repo "https://github.com/affaan-m/everything-claude-code.git" \
+    "$HOME/Projects/leegonzales/everything-claude-code" "everything-claude-code (reference)"
 
 # ── Shell config ───────────────────────────────────────────────────────
 
@@ -244,10 +357,25 @@ echo ""
 echo "  5. Playwright browsers:"
 echo "     npx playwright install"
 echo ""
-echo "  6. Reload shell:"
+echo "  6. Configure MCP servers in Claude Code settings:"
+echo "     - google-workspace-mcp (~/Projects/leegonzales/google-workspace-mcp)"
+echo "     - mcp-agent-mail (~/Projects/mcp_agent_mail)"
+echo "     - heygen-mcp (~/Projects/leegonzales/heygen-mcp-fork) [optional]"
+echo ""
+echo "  7. Reload shell:"
 echo "     source ~/.zshrc"
 echo ""
-echo "  7. Verify:"
+echo "  8. Verify:"
 echo "     claude --version && cass health && bd --version"
 echo "     ls ~/.claude/skills/ | wc -l  # Should be 30+"
+echo "     which claude-guardrails       # Guardrails binary"
+echo ""
+echo -e "${BLUE}Repos cloned to ~/Projects/leegonzales/:${NC}"
+echo "  AISkills, agent-orchestra, asupersync, cass,"
+echo "  claude-allowlist, claude-guardrails, everything-claude-code,"
+echo "  franken_agent_detection, frankensearch, frankentui,"
+echo "  google-workspace-mcp, heygen-mcp-fork, toon_rust"
+echo ""
+echo -e "${BLUE}Repos cloned to ~/Projects/:${NC}"
+echo "  claude-sandboxes, claude-speak, mcp_agent_mail"
 echo ""

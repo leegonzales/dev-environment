@@ -55,11 +55,41 @@ ls ~/.claude/skills/ | wc -l  # 30+ skills loaded
 
 ## External Repos (Cloned by Bootstrap)
 
+### Tier 1 — Core AI Agent Infrastructure
+
 | Repo | Destination | Purpose |
 |------|-------------|---------|
-| `leegonzales/AISkills` | `~/Projects/leegonzales/AISkills` | Skill files symlinked to `~/.claude/skills/` |
-| `leegonzales/claude-sandboxes` | `~/Projects/claude-sandboxes` | Docker sandbox system |
+| `leegonzales/AISkills` | `~/Projects/leegonzales/AISkills` | 38+ skills, symlinked to `~/.claude/skills/` |
+| `leegonzales/claude-sandboxes` | `~/Projects/claude-sandboxes` | Docker sandbox system for isolated execution |
 | `leegonzales/claude-speak` | `~/Projects/claude-speak` | TTS daemon (Kokoro on Apple Silicon) |
+| `leegonzales/claude-guardrails` | `~/Projects/leegonzales/claude-guardrails` | Security guardrails (Rust binary, 80+ rules) |
+| `leegonzales/claude-allowlist` | `~/Projects/leegonzales/claude-allowlist` | Pre-approved safe command lists |
+| `leegonzales/agent-orchestra` | `~/Projects/leegonzales/agent-orchestra` | Multi-agent orchestration (Claude + Gemini workers) |
+
+### Tier 2 — CASS + Dependencies (built from source)
+
+| Repo | Destination | Purpose |
+|------|-------------|---------|
+| `Dicklesworthstone/coding_agent_session_search` | `~/Projects/leegonzales/cass` | CASS — cross-agent session search |
+| `Dicklesworthstone/frankensearch` | `~/Projects/leegonzales/frankensearch` | Hybrid local search (lexical + vector) |
+| `Dicklesworthstone/frankentui` | `~/Projects/leegonzales/frankentui` | Terminal UI kernel (Elm architecture) |
+| `Dicklesworthstone/franken_agent_detection` | `~/Projects/leegonzales/franken_agent_detection` | Coding agent tool detection |
+| `Dicklesworthstone/asupersync` | `~/Projects/leegonzales/asupersync` | Async runtime for Rust |
+| `Dicklesworthstone/toon_rust` | `~/Projects/leegonzales/toon_rust` | Structured conversation serialization |
+
+### Tier 3 — MCP Servers
+
+| Repo | Destination | Purpose |
+|------|-------------|---------|
+| `leegonzales/google-workspace-mcp` | `~/Projects/leegonzales/google-workspace-mcp` | Google Workspace MCP server |
+| `leegonzales/mcp_agent_mail` | `~/Projects/mcp_agent_mail` | Email automation MCP server |
+| `leegonzales/heygen-mcp` | `~/Projects/leegonzales/heygen-mcp-fork` | HeyGen video generation MCP (optional) |
+
+### Tier 4 — Reference
+
+| Repo | Destination | Purpose |
+|------|-------------|---------|
+| `affaan-m/everything-claude-code` | `~/Projects/leegonzales/everything-claude-code` | Comprehensive Claude Code reference guide |
 
 ## Excluded
 
