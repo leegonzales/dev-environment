@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(~/.claude/skills/pr-review-loop/scripts/commit-and-push.sh *)",
+      "Bash(~/.claude/skills/pr-review-loop/scripts/reply-to-comment.sh *)",
+      "Bash(~/.claude/skills/pr-review-loop/scripts/trigger-review.sh *)",
+      "Bash(~/.claude/skills/pr-review-loop/scripts/get-review-comments.sh *)",
+      "Bash(~/.claude/skills/pr-review-loop/scripts/summarize-reviews.sh *)",
+      "Bash(~/.claude/skills/pr-review-loop/scripts/claude-review.sh *)",
+      "Bash(~/.claude/skills/pr-review-loop/scripts/check-gemini-quota.sh *)",
+      "Bash(~/.claude/skills/pr-review-loop/scripts/watch-pr.sh *)",
+      "Bash(~/.claude/skills/pr-review-loop/scripts/resolve-comment.sh *)",
+      "Bash(~/.claude/skills/pr-review-loop/scripts/post-line-comment.sh *)",
+      "Bash(~/.claude/skills/pr-review-loop/scripts/get-agent-comments.sh *)",
+      "Bash(~/.claude/skills/pr-review-loop/scripts/reopen-comment.sh *)",
+      "Bash(mdls *)",
+      "Bash(duti *)",
+      "Bash(~/Projects/claude-speak/.venv/bin/claude-speak-client *)",
+      "Bash(security find-generic-password:*)",
+      "Bash(security dump-keychain)",
+      "Bash(python3:*)"
+    ],
+    "deny": [],
+    "ask": []
+  },
+  "prefersReducedMotion": true
+}

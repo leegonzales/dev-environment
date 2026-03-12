@@ -1,0 +1,22 @@
+# Allowlist patterns - commands matching these bypass all checks
+# Lines starting with # are comments
+#
+# Add patterns here to override blocks for legitimate use cases.
+# Be specific to avoid creating security holes.
+#
+# Examples:
+# rm\s+-rf\s+\./node_modules    # Allow cleaning node_modules
+# rm\s+-rf\s+\./build           # Allow cleaning build directory
+# rm\s+-rf\s+\./dist            # Allow cleaning dist directory
+# rm\s+-rf\s+\./\.cache         # Allow cleaning cache directories
+# git\s+push\s+-f\s+origin\s+feature-  # Allow force push to feature branches
+# DROP\s+TABLE\s+IF\s+EXISTS\s+.*_test  # Allow dropping test tables
+
+# Common safe cleanup patterns (uncomment as needed):
+# rm\s+-rf\s+\./node_modules
+# rm\s+-rf\s+\./dist
+# rm\s+-rf\s+\./build
+# rm\s+-rf\s+\./__pycache__
+# rm\s+-rf\s+\./\.pytest_cache
+# rm\s+-rf\s+\./\.next
+# rm\s+-rf\s+\./target

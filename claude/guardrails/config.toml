@@ -1,0 +1,23 @@
+# claude-guardrails configuration
+# See: https://github.com/leegonzales/claude-guardrails
+
+[general]
+# Safety level: critical | high | strict
+safety_level = "high"
+
+# Enable audit logging
+audit_log = true
+
+# Path to audit log file
+audit_path = "~/.claude/guardrails/audit.jsonl"
+
+[overrides]
+# Path to user allowlist file (create to add exceptions)
+allowlist_file = "~/.claude/guardrails/allow.toml"
+
+[bash]
+# Block variable-based command execution ($cmd, $(cmd), `cmd`)
+block_variable_commands = true
+
+# Block dangerous pipe targets (| sh, | bash)
+block_pipe_to_shell = true

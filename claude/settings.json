@@ -1,0 +1,81 @@
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(bd *)",
+      "Bash(brew *)",
+      "Bash(claude *)",
+      "Bash(codex *)",
+      "Bash(cursor *)",
+      "Bash(docker *)",
+      "Bash(du *)",
+      "Bash(ffmpeg *)",
+      "Bash(ffprobe *)",
+      "Bash(gemini *)",
+      "Bash(gh *)",
+      "Bash(git *)",
+      "Bash(go *)",
+      "Bash(jq *)",
+      "Bash(ls *)",
+      "Bash(mkdir *)",
+      "Bash(node *)",
+      "Bash(npm *)",
+      "Bash(npx *)",
+      "Bash(open *)",
+      "Bash(pip *)",
+      "Bash(pip3 *)",
+      "Bash(pipx *)",
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(pytest *)",
+      "Bash(pwd)",
+      "Bash(ruff *)",
+      "Bash(tree *)",
+      "Bash(tsc *)",
+      "Bash(uv *)",
+      "Bash(which *)",
+      "Edit(*)",
+      "Read(*)",
+      "Skill(*)",
+      "WebFetch(*)",
+      "WebSearch",
+      "Write(*)",
+      "mcp__chrome-devtools__*",
+      "mcp__google-workspace__*",
+      "mcp__maps-grounding-lite__*",
+      "mcp__nanobanana-mcp__*",
+      "mcp__veo-mcp__*"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/guardrails/claude-guardrails",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash ~/.claude/statusline-command.sh"
+  },
+  "enabledPlugins": {
+    "beads@beads-marketplace": true,
+    "frontend-design@claude-code-plugins": true,
+    "pyright-lsp@claude-plugins-official": true,
+    "superpowers@superpowers-marketplace": true,
+    "please-hold@please-hold-marketplace": true,
+    "rust-analyzer-lsp@claude-plugins-official": true
+  },
+  "alwaysThinkingEnabled": true,
+  "autoUpdatesChannel": "stable",
+  "skipDangerousModePermissionPrompt": true
+}

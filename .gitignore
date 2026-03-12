@@ -1,0 +1,20 @@
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Secrets (never commit)
+.env
+.env.local
+*.pem
+secrets/
+keys/
+
+# Logs
+*.log
+
+# Claude auto-memory (machine-specific)
+claude/memory/

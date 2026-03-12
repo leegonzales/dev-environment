@@ -1,0 +1,33 @@
+# Dangerous command patterns - one regex per line
+# Lines starting with # are comments
+
+# Recursive delete of dangerous paths
+# Note: Anchored to prevent matching ./build, ./dist, etc.
+rm\s+(-[rf]+\s+)+/\s*$
+rm\s+(-[rf]+\s+)+~\s*$
+rm\s+(-[rf]+\s+)+~\/\s*$
+rm\s+(-[rf]+\s+)+\.\s*$
+
+# SQL destructive operations
+DROP\s+(TABLE|DATABASE|SCHEMA)
+TRUNCATE\s+TABLE
+
+# Dangerous git operations
+# Force push to protected branches (main/master) - handles both flag orders
+# Uses word boundary to avoid matching branch names like "feature-main-update"
+git\s+push\s+.*(-f|--force).*\s(main|master)\s*$
+git\s+push\s+.*(main|master)\s+.*(-f|--force)
+git\s+push\s+(-f|--force)\s+origin\s+(main|master)
+git\s+reset\s+--hard
+git\s+clean\s+-[dDfFxX]+
+
+# Dangerous permissions
+chmod\s+(777|a\+rwx)
+
+# Device/filesystem destruction
+>\s*/dev/(sd|nvme|disk|vd)
+mkfs\.[a-z]+
+dd\s+.*of=/dev/
+
+# Fork bombs and similar
+:\(\)\{.*:\|:
