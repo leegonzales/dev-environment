@@ -23,8 +23,8 @@ from pathlib import Path
 CLAUDE_FLAGS = "--permission-mode bypassPermissions"
 CONFIG_PATH = Path(__file__).resolve().parent / "config.toml"
 
-# Pane border labels need tmux 3.2+ (pane-border-format)
-TMUX_PANE_BORDER = "#{?pane_active,#[bold],#[dim]}#{pane_title}"
+# Pane border format using @agent_label (survives Claude overwriting pane_title)
+TMUX_PANE_BORDER = "#{?pane_active,#[bold],#[dim]}#{@agent_label}"
 
 
 # ── Config ──────────────────────────────────────────────
@@ -179,10 +179,10 @@ def create_screen_session(
         check=True,
     )
 
-    # Label the first pane
+    # Label the first pane (using @agent_label — survives Claude overwriting pane_title)
     subprocess.run(
-        ["tmux", "select-pane", "-t", _pane_target(session_name, 0),
-         "-T", agents[0].get("label", agents[0]["name"])],
+        ["tmux", "set-option", "-t", _pane_target(session_name, 0),
+         "-p", "@agent_label", agents[0].get("label", agents[0]["name"])],
         check=False,
     )
 
@@ -197,8 +197,8 @@ def create_screen_session(
             check=True,
         )
         subprocess.run(
-            ["tmux", "select-pane", "-t", _pane_target(session_name, i),
-             "-T", agent.get("label", agent["name"])],
+            ["tmux", "set-option", "-t", _pane_target(session_name, i),
+             "-p", "@agent_label", agent.get("label", agent["name"])],
             check=False,
         )
 
