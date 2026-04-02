@@ -1,0 +1,214 @@
+# fleet-up configuration
+# All agent definitions, screen layouts, display modes
+
+[display.samsung]
+cols = 3
+rows = 2
+
+[display.macbook]
+cols = 2
+rows = 2
+
+# ── Screens ──────────────────────────────────────────
+
+[screens.command]
+label = "Command"
+workspace_samsung = 1
+workspace_macbook = [1, 2]
+
+[screens.training]
+label = "Training"
+workspace_samsung = 2
+workspace_macbook = [2, 3]
+
+[screens.media]
+label = "Media Empire"
+workspace_samsung = 3
+workspace_macbook = [3, 4]
+
+[screens.tools]
+label = "Tools & Twin"
+workspace_samsung = 4
+workspace_macbook = [4, 5]
+
+# ── Agents ───────────────────────────────────────────
+
+[[agents]]
+name = "adama"
+label = "Adama | Fleet Commander"
+repo = "~/Projects/leegonzales/servitor"
+screen = "command"
+slot = 1
+claude = true
+
+[[agents]]
+name = "dax-1"
+label = "Dax-1 | BizOps"
+repo = "~/Projects/catalyst/bizops"
+screen = "command"
+slot = 2
+claude = true
+
+[[agents]]
+name = "dax-2"
+label = "Dax-2 | BizOps"
+repo = "~/Projects/catalyst/bizops"
+screen = "command"
+slot = 3
+claude = true
+
+[[agents]]
+name = "alfred-1"
+label = "Alfred-1 | Personal Ops"
+repo = "~/Projects/leegonzales/alfred"
+screen = "command"
+slot = 4
+claude = true
+
+[[agents]]
+name = "alfred-2"
+label = "Alfred-2 | Personal Ops"
+repo = "~/Projects/leegonzales/alfred"
+screen = "command"
+slot = 5
+claude = true
+
+[[agents]]
+name = "cass-cmd"
+label = "cass monitor | Command"
+repo = "~/Projects"
+screen = "command"
+slot = 6
+claude = false
+command = "cass monitor"
+
+[[agents]]
+name = "walsh-1"
+label = "Walsh-1 | Training"
+repo = "~/Projects/leegonzales/AIEnablementTraining"
+screen = "training"
+slot = 1
+claude = true
+
+[[agents]]
+name = "walsh-2"
+label = "Walsh-2 | RANGE"
+repo = "~/Projects/leegonzales/range-framework"
+screen = "training"
+slot = 2
+claude = true
+
+[[agents]]
+name = "dax-3"
+label = "Dax-3 | BizOps"
+repo = "~/Projects/catalyst/bizops"
+screen = "training"
+slot = 3
+claude = true
+
+[[agents]]
+name = "workbench"
+label = "Workbench | Lee"
+repo = "~/Projects"
+screen = "training"
+slot = 4
+claude = false
+
+[[agents]]
+name = "cass-trn"
+label = "cass monitor | Training"
+repo = "~/Projects"
+screen = "training"
+slot = 5
+claude = false
+command = "cass monitor"
+
+[[agents]]
+name = "reith"
+label = "Reith | Media Coordinator"
+repo = "~/Projects/leegonzales/reith"
+screen = "media"
+slot = 1
+claude = true
+
+[[agents]]
+name = "sisko"
+label = "Sisko | Strategy"
+repo = "~/Projects/leegonzales/sisko"
+screen = "media"
+slot = 2
+claude = true
+
+[[agents]]
+name = "burke"
+label = "Burke | Substack"
+repo = "~/Projects/leegonzales/substack"
+screen = "media"
+slot = 3
+claude = true
+
+[[agents]]
+name = "carl"
+label = "Carl | Talk Show"
+repo = "~/Projects/leegonzales/ai-talkshow-cli"
+screen = "media"
+slot = 4
+claude = true
+
+[[agents]]
+name = "elliot"
+label = "Elliot | Weather"
+repo = "~/Projects/leegonzales/ElliotSkyFallDailyWeather"
+screen = "media"
+slot = 5
+claude = true
+
+[[agents]]
+name = "cass-med"
+label = "cass monitor | Media"
+repo = "~/Projects"
+screen = "media"
+slot = 6
+claude = false
+command = "cass monitor"
+
+[[agents]]
+name = "pike"
+label = "Pike | Skills & Config"
+repo = "~/Projects/leegonzales/everything-claude-code"
+screen = "tools"
+slot = 1
+claude = true
+
+[[agents]]
+name = "geordi"
+label = "Geordi | Tooling"
+repo = "~/Projects/leegonzales/cass"
+screen = "tools"
+slot = 2
+claude = true
+
+[[agents]]
+name = "secondbrain"
+label = "SecondBrain | Knowledge"
+repo = "~/Projects/leegonzales/SecondBrain"
+screen = "tools"
+slot = 3
+claude = true
+
+[[agents]]
+name = "data"
+label = "Data | Digital Twin"
+repo = "~/Projects/leegonzales/SiliconDoppelgangerActual"
+screen = "tools"
+slot = 4
+claude = true
+
+[[agents]]
+name = "cass-tools"
+label = "cass monitor | Tools"
+repo = "~/Projects"
+screen = "tools"
+slot = 5
+claude = false
+command = "cass monitor"
