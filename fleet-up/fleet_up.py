@@ -21,7 +21,7 @@ import tomllib
 from pathlib import Path
 
 CLAUDE_FLAGS = "--permission-mode bypassPermissions"
-CONFIG_PATH = Path(__file__).parent / "config.toml"
+CONFIG_PATH = Path(__file__).resolve().parent / "config.toml"
 
 # Pane border labels need tmux 3.2+ (pane-border-format)
 TMUX_PANE_BORDER = "#{?pane_active,#[bold],#[dim]}#{pane_title}"
@@ -112,11 +112,34 @@ def _pane_count(session: str) -> int:
     return len(result.stdout.strip().splitlines())
 
 
+def _base_indices(session: str) -> tuple[int, int]:
+    """Get window base-index and pane base-index for a session."""
+    result = subprocess.run(
+        ["tmux", "show-options", "-gv", "base-index"],
+        capture_output=True, text=True,
+    )
+    win_base = int(result.stdout.strip()) if result.returncode == 0 else 0
+
+    result = subprocess.run(
+        ["tmux", "show-options", "-gv", "pane-base-index"],
+        capture_output=True, text=True,
+    )
+    pane_base = int(result.stdout.strip()) if result.returncode == 0 else 0
+
+    return win_base, pane_base
+
+
+def _pane_target(session: str, pane_index: int) -> str:
+    """Build a tmux pane target that works regardless of base-index."""
+    win_base, pane_base = _base_indices(session)
+    return f"{session}:{win_base}.{pane_base + pane_index}"
+
+
 def _pane_running(session: str, pane_index: int) -> bool:
     """Check if something other than a shell is running in a specific pane."""
-    target = f"{session}:{0}.{pane_index}"
+    target = _pane_target(session, pane_index)
     result = subprocess.run(
-        ["tmux", "list-panes", "-t", target, "-F", "#{pane_current_command}"],
+        ["tmux", "display-message", "-t", target, "-p", "#{pane_current_command}"],
         capture_output=True,
         text=True,
     )
@@ -158,7 +181,7 @@ def create_screen_session(
 
     # Label the first pane
     subprocess.run(
-        ["tmux", "select-pane", "-t", f"{session_name}:0.0",
+        ["tmux", "select-pane", "-t", _pane_target(session_name, 0),
          "-T", agents[0].get("label", agents[0]["name"])],
         check=False,
     )
@@ -174,7 +197,7 @@ def create_screen_session(
             check=True,
         )
         subprocess.run(
-            ["tmux", "select-pane", "-t", f"{session_name}:0.{i}",
+            ["tmux", "select-pane", "-t", _pane_target(session_name, i),
              "-T", agent.get("label", agent["name"])],
             check=False,
         )
@@ -214,7 +237,7 @@ def launch_agents_in_session(
     agents = agents_for_screen(config, screen)
 
     for i, agent in enumerate(agents):
-        target = f"{session_name}:0.{i}"
+        target = _pane_target(session_name, i)
 
         if _pane_running(session_name, i):
             print(f"    {agent['name']}: process running, skipping")
