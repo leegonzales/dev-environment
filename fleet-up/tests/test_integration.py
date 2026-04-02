@@ -1,4 +1,4 @@
-"""Integration test: launch 2 agents, verify tmux, teardown.
+"""Integration test: tmux session lifecycle.
 
 Requires tmux running. Skipped in CI.
 """
@@ -12,9 +12,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fleet_up import (
-    create_tmux_session,
     load_config,
     tmux_session_exists,
+    create_screen_session,
+    agents_for_screen,
+    _pane_count,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -25,37 +27,36 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(autouse=True)
 def cleanup_test_session():
-    """Ensure test tmux session is cleaned up."""
+    """Ensure test tmux sessions are cleaned up."""
     yield
-    if tmux_session_exists("test-agent"):
-        subprocess.run(["tmux", "kill-session", "-t", "test-agent"], check=False)
+    for name in ("test-screen", "command"):
+        if tmux_session_exists(name):
+            subprocess.run(["tmux", "kill-session", "-t", name], check=False)
 
 
-def test_tmux_session_lifecycle():
-    """Create a tmux session, verify it exists, kill it."""
-    agent = {
-        "name": "test-agent",
-        "label": "Test Agent",
-        "repo": "~/Projects",
-        "claude": False,
-    }
+def test_screen_session_lifecycle():
+    """Create a screen session with panes, verify, tear down."""
+    config = load_config()
 
-    # Cleanup in case prior run left it
-    if tmux_session_exists("test-agent"):
-        subprocess.run(["tmux", "kill-session", "-t", "test-agent"])
+    # Clean slate
+    if tmux_session_exists("command"):
+        subprocess.run(["tmux", "kill-session", "-t", "command"], check=False)
 
-    # Create
-    created = create_tmux_session(agent)
+    # Create command screen session
+    created = create_screen_session(config, "command", "samsung")
     assert created is True
-    assert tmux_session_exists("test-agent")
+    assert tmux_session_exists("command")
+
+    # Should have 6 panes (6 agents on command screen)
+    assert _pane_count("command") == 6
 
     # Idempotent: second call returns False
-    created2 = create_tmux_session(agent)
+    created2 = create_screen_session(config, "command", "samsung")
     assert created2 is False
 
-    # Cleanup
-    subprocess.run(["tmux", "kill-session", "-t", "test-agent"])
-    assert not tmux_session_exists("test-agent")
+    # Teardown
+    subprocess.run(["tmux", "kill-session", "-t", "command"], check=False)
+    assert not tmux_session_exists("command")
 
 
 def test_status_command():
@@ -66,4 +67,4 @@ def test_status_command():
         text=True,
     )
     assert result.returncode == 0
-    assert "Name" in result.stdout  # Header row
+    assert "Command" in result.stdout

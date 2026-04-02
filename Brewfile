@@ -46,6 +46,3 @@ brew "cass"
 
 # Docker
 cask "docker"
-
-# Window management
-cask "nikitabobko/tap/aerospace"
