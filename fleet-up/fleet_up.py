@@ -17,7 +17,10 @@ CLAUDE_FLAGS = "--permission-mode bypassPermissions"
 # ── Config ──────────────────────────────────────────────
 
 
-def load_config(path: Path) -> dict:
+CONFIG_PATH = Path(__file__).parent / "config.toml"
+
+
+def load_config(path: Path = CONFIG_PATH) -> dict:
     """Load TOML config and return parsed dict."""
     with open(path, "rb") as f:
         return tomllib.load(f)
@@ -131,9 +134,15 @@ def _process_running_in_tmux(name: str) -> bool:
     return cmd not in ("", "zsh", "bash", "sh", "fish")
 
 
-def create_tmux_session(agent: dict) -> None:
-    """Create a detached tmux session, cd to repo, set title."""
+def create_tmux_session(agent: dict) -> bool:
+    """Create a detached tmux session, cd to repo, set title.
+
+    Returns True if created, False if already existed.
+    """
     name = agent["name"]
+    if tmux_session_exists(name):
+        return False
+
     repo = str(Path(agent["repo"]).expanduser())
 
     if not Path(repo).is_dir():
@@ -149,6 +158,7 @@ def create_tmux_session(agent: dict) -> None:
         ["tmux", "select-pane", "-t", name, "-T", agent.get("label", name)],
         check=False,
     )
+    return True
 
 
 def launch_in_tmux(agent: dict) -> None:
@@ -172,10 +182,27 @@ def launch_in_tmux(agent: dict) -> None:
 # ── Ghostty ─────────────────────────────────────────────
 
 
+def _ghostty_window_exists_for(name: str) -> bool:
+    """Check if a Ghostty window is already attached to this tmux session."""
+    result = subprocess.run(
+        ["tmux", "list-clients", "-t", name, "-F", "#{client_name}"],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and result.stdout.strip() != ""
+
+
 def open_ghostty_window(agent: dict) -> None:
-    """Open a Ghostty window attached to the agent's tmux session."""
+    """Open a Ghostty window attached to the agent's tmux session.
+
+    Skips if a client is already attached to the tmux session.
+    """
     name = agent["name"]
     label = agent.get("label", name)
+
+    if _ghostty_window_exists_for(name):
+        print(f"    Ghostty already attached to '{name}', skipping")
+        return
 
     subprocess.Popen(
         [
@@ -217,27 +244,29 @@ def launch_agent(config: dict, agent: dict, mode: str) -> None:
     print(f"  Launching {name} ({agent.get('label', name)})...")
 
     # 1. tmux session (idempotent)
-    if tmux_session_exists(name):
-        print(f"    tmux session '{name}' exists, reusing")
-        if _process_running_in_tmux(name):
-            print("    process already running, skipping launch")
-        else:
-            launch_in_tmux(agent)
-    else:
-        repo_path = Path(agent["repo"]).expanduser()
-        if not repo_path.is_dir():
-            print(f"    WARN: repo {repo_path} missing, skipping agent")
-            return
-        create_tmux_session(agent)
+    repo_path = Path(agent["repo"]).expanduser()
+    if not repo_path.is_dir():
+        print(f"    WARN: repo {repo_path} missing, skipping agent")
+        return
+
+    created = create_tmux_session(agent)
+    if created:
         launch_in_tmux(agent)
+    elif not _process_running_in_tmux(name):
+        print(f"    tmux session '{name}' exists, relaunching command")
+        launch_in_tmux(agent)
+    else:
+        print(f"    tmux session '{name}' exists, process running, skipping")
 
-    # 2. Ghostty window
-    open_ghostty_window(agent)
-    time.sleep(0.3)  # Brief pause for window to register
+    # 2. Ghostty window (idempotent — skips if already attached)
+    already_attached = _ghostty_window_exists_for(name)
+    if not already_attached:
+        open_ghostty_window(agent)
+        time.sleep(0.5)  # Let window open and register with AeroSpace
 
-    # 3. Move to workspace
-    ws = workspace_for_agent(config, agent, mode)
-    move_window_to_workspace(ws)
+        # 3. Move new window to workspace
+        ws = workspace_for_agent(config, agent, mode)
+        move_window_to_workspace(ws)
 
 
 def launch_screen(config: dict, screen: str, mode: str) -> None:
