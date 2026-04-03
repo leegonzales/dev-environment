@@ -290,7 +290,7 @@ def open_ghostty_for_session(session: str, label: str) -> None:
     subprocess.Popen(
         [
             "open", "-na", "Ghostty", "--args",
-            "-e", f"tmux attach-session -t {session}",
+            "-e", "tmux", "attach-session", "-t", session,
         ],
     )
 
