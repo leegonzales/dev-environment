@@ -255,7 +255,7 @@ def launch_agents_in_session(
             check=True,
         )
         print(f"    {agent['name']}: launched")
-        time.sleep(0.3)  # Brief pause between launches
+        time.sleep(3)  # Stagger agent launches to avoid CPU spike
 
 
 # ── Ghostty ─────────────────────────────────────────────
@@ -330,11 +330,16 @@ def launch_fleet(
     print(f"fleet-up | mode={mode} | tmux-only (no WM dependencies)")
 
     screens = [screen_filter] if screen_filter else all_screens(config)
-    for screen in screens:
+    for i, screen in enumerate(screens):
         if screen not in config["screens"]:
             print(f"ERROR: screen '{screen}' not found in config")
             sys.exit(1)
         launch_screen(config, screen, mode)
+
+        # Pause between screens to let agents settle (skip after last)
+        if i < len(screens) - 1:
+            print(f"\n  Waiting 10s before next screen...")
+            time.sleep(10)
 
     print(f"\nFleet launched. Full-screen each Ghostty window (Cmd+Ctrl+F) for separate Spaces.")
     print(f"Use 'fleet-up --status' to check agent status.")
