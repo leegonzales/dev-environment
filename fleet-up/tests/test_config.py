@@ -8,7 +8,7 @@ from fleet_up import load_config, detect_display_mode, agents_for_screen, all_sc
 
 def test_load_config_returns_agents():
     config = load_config()
-    assert len(config["agents"]) == 22
+    assert len(config["agents"]) == 19
     assert config["display"]["samsung"]["cols"] == 3
 
 
@@ -40,6 +40,6 @@ def test_all_screens_order():
 def test_screen_agent_counts():
     config = load_config()
     assert len(agents_for_screen(config, "command")) == 6
-    assert len(agents_for_screen(config, "training")) == 5
-    assert len(agents_for_screen(config, "media")) == 6
-    assert len(agents_for_screen(config, "tools")) == 5
+    assert len(agents_for_screen(config, "training")) == 4
+    assert len(agents_for_screen(config, "media")) == 5
+    assert len(agents_for_screen(config, "tools")) == 4

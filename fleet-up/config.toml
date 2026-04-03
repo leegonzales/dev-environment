@@ -114,14 +114,6 @@ screen = "training"
 slot = 4
 claude = false
 
-[[agents]]
-name = "cass-trn"
-label = "cass monitor | Training"
-repo = "~/Projects"
-screen = "training"
-slot = 5
-claude = false
-command = "cass monitor"
 
 [[agents]]
 name = "reith"
@@ -163,14 +155,6 @@ screen = "media"
 slot = 5
 claude = true
 
-[[agents]]
-name = "cass-med"
-label = "cass monitor | Media"
-repo = "~/Projects"
-screen = "media"
-slot = 6
-claude = false
-command = "cass monitor"
 
 [[agents]]
 name = "pike"
@@ -204,11 +188,3 @@ screen = "tools"
 slot = 4
 claude = true
 
-[[agents]]
-name = "cass-tools"
-label = "cass monitor | Tools"
-repo = "~/Projects"
-screen = "tools"
-slot = 5
-claude = false
-command = "cass monitor"
