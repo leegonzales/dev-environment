@@ -275,16 +275,22 @@ def open_ghostty_for_session(session: str, label: str) -> None:
     """Open a Ghostty window attached to a tmux session.
 
     Skips if a client is already attached.
+    Title is set via tmux (Ghostty's -e consumes all remaining args).
     """
     if _client_attached_to(session):
         print(f"  Ghostty already attached to '{session}', skipping")
         return
 
+    # Set tmux session name as window title (Ghostty picks this up)
+    subprocess.run(
+        ["tmux", "rename-window", "-t", session, label],
+        check=False,
+    )
+
     subprocess.Popen(
         [
             "open", "-na", "Ghostty", "--args",
             "-e", f"tmux attach-session -t {session}",
-            "--title", label,
         ],
     )
 
