@@ -18,3 +18,17 @@ keys/
 
 # Claude auto-memory (machine-specific)
 claude/memory/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Worktrees
+.worktrees/
+
+# Servitor
+.servitor/
