@@ -1,0 +1,51 @@
+# mcp-proxy-mux configuration
+#
+# Each [servers.<name>] wraps a stdio MCP server as a shared HTTP endpoint.
+# All 17+ Claude Code agents connect to one process instead of spawning their own.
+#
+# SAFE TO SHARE: stateless API-calling servers (no browser/session state)
+# NOT SAFE: chrome-devtools, playwright (browser state), mattermost (per-agent identity)
+
+[proxy]
+host = "127.0.0.1"
+request_timeout = 120  # seconds — some tool calls (image/video gen) are slow
+
+# ── Servers ─────────────────────────────────────────────
+
+[servers.google-workspace-personal]
+command = "node"
+args = ["/Users/leegonzales/Projects/leegonzales/google-workspace-mcp/workspace-server/dist/index.js"]
+env = { WORKSPACE_PROFILE = "personal" }
+port = 9100
+
+[servers.google-workspace]
+command = "node"
+args = ["/Users/leegonzales/Projects/leegonzales/google-workspace-mcp/workspace-server/dist/index.js", "--debug"]
+port = 9101
+
+[servers.nanobanana-mcp]
+command = "node"
+args = ["/Users/leegonzales/Projects/leegonzales/MCPServers/nanobanana-mcp/dist/index.js"]
+env_files = ["~/.config/claude-env/gemini.env"]
+# Use ~/.local/share path to avoid macOS TCC (launchd can't scandir ~/Documents)
+env = { NANOBANANA_OUTPUT_DIR = "/Users/leegonzales/.local/share/nanobanana/generated" }
+port = 9102
+
+# brave-search requires BRAVE_API_KEY — add to ~/.config/claude-env/brave.env
+# Get one at https://brave.com/search/api/
+# [servers.brave-search]
+# command = "npx"
+# args = ["-y", "@brave/brave-search-mcp-server"]
+# env_files = ["~/.config/claude-env/brave.env"]
+# port = 9103
+
+[servers.netlify]
+command = "npx"
+args = ["-y", "@netlify/mcp"]
+port = 9104
+
+[servers.veo-mcp]
+command = "node"
+args = ["/Users/leegonzales/Projects/leegonzales/MCPServers/veo-mcp/dist/index.js"]
+env_files = ["~/.config/claude-env/gemini.env"]
+port = 9105

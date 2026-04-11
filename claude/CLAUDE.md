@@ -60,6 +60,7 @@
 | Create PR | `gh pr create --fill --web`                                 |
 | Search history | `cass search "<query>"` (cross-agent session search)    |
 | Google Workspace | `gws-difflab`, `gws-catalyst`, `gws-personal` (per-org) |
+| MCP proxy | `mcp-proxy-mux --status` (shared MCP server health)     |
 
 Claude must use these exact incantations.
 

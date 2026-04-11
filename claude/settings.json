@@ -44,6 +44,7 @@
       "Write(*)",
       "mcp__chrome-devtools__*",
       "mcp__google-workspace__*",
+      "mcp__google-workspace-personal__*",
       "mcp__maps-grounding-lite__*",
       "mcp__nanobanana-mcp__*",
       "mcp__veo-mcp__*"
