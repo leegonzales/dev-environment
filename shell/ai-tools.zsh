@@ -15,6 +15,11 @@ export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 
+# cass / fsqlite: the default page-buffer pool (1 GiB) is smaller than a
+# long-lived session DB, which makes `cass index` fail with a bogus "out of
+# memory". Matches the launchd watcher (launchd/com.cass.index-watch.plist).
+export FSQLITE_PAGE_BUFFER_MAX=1048576
+
 # --- Aliases ---
 
 # Python

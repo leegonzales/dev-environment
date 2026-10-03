@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Caps logs written by long-running launchd jobs. Every 6 hours, a log over
+     50 MB keeps its newest 10 MB in <log>.1 and is emptied in place.
+     Only list logs whose writer opens them in append mode; see the header of
+     launchd/bin/trim-log.sh. cass-index.log grows ~14 MB/day and reached
+     609 MB during the 2026-09 watch loop. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dev-environment.log-trim</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>/Users/__USERNAME__/Projects/leegonzales/dev-environment/launchd/bin/trim-log.sh</string>
+        <string>/Users/__USERNAME__/Library/Logs/cass-index.log</string>
+        <string>50</string>
+        <string>10</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>21600</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/__USERNAME__/Library/Logs/log-trim.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/__USERNAME__/Library/Logs/log-trim.log</string>
+</dict>
+</plist>
