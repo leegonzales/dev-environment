@@ -22,6 +22,16 @@
     <dict>
         <key>PATH</key>
         <string>/Users/__USERNAME__/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <!-- fsqlite's default page-buffer pool is 262144 x 4 KiB = 1 GiB. Once
+             the session DB outgrows it, ingest fails with a bogus "out of
+             memory" and `index watch` retries the same files forever, pinning a
+             core (cass #510). 1048576 = 4 GiB; raise it as the DB grows. -->
+        <key>FSQLITE_PAGE_BUFFER_MAX</key>
+        <string>1048576</string>
+        <!-- Safety net for cass <= 0.6.x: quarantine instead of the endless
+             defer loop if a NoMem still fires. A no-op from cass #364 onward. -->
+        <key>CASS_WATCH_OOM_SMALL_CONVERSATION_BYTES</key>
+        <string>0</string>
     </dict>
 </dict>
 </plist>
