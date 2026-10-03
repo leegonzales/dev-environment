@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+import mcp_proxy.backend as backend_mod
 from mcp_proxy.backend import BackendUnavailable, StdioBackend
 
 # A minimal fake MCP server that responds to JSON-RPC on stdin/stdout
@@ -258,3 +259,59 @@ async def test_backend_respawns_after_child_exit(backend: StdioBackend) -> None:
     assert r["result"]["content"][0]["text"] == "reborn"
     assert backend._process.pid != first_pid
     assert backend.is_running
+
+
+# ── Startup isolation: a backend that cannot launch must not raise ──
+
+
+@pytest.mark.asyncio
+async def test_start_with_missing_command_does_not_raise(tmp_path: Path) -> None:
+    b = StdioBackend("ghost", str(tmp_path / "no-such-binary"), [])
+    await b.start()  # must not raise: one bad server cannot kill the proxy
+    try:
+        assert not b.is_running
+    finally:
+        await b.stop()
+
+
+@pytest.mark.asyncio
+async def test_request_to_unstartable_backend_fails_fast(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A down backend fails a request within the ready-wait cap, not the
+    caller's (much longer) timeout."""
+    monkeypatch.setattr(backend_mod, "READY_WAIT_MAX", 0.5)
+    b = StdioBackend("ghost", str(tmp_path / "no-such-binary"), [])
+    await b.start()
+    try:
+        loop = asyncio.get_running_loop()
+        t0 = loop.time()
+        with pytest.raises(BackendUnavailable):
+            await b.send_request("tools/list", timeout=30)
+        assert loop.time() - t0 < 3
+    finally:
+        await b.stop()
+
+
+@pytest.mark.asyncio
+async def test_backend_recovers_once_command_appears(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Started before its binary exists, the backend keeps retrying and serves
+    once the binary appears (e.g. an npx cache that was still installing)."""
+    monkeypatch.setattr(backend_mod, "RESPAWN_BASE_DELAY", 0.05)
+    monkeypatch.setattr(backend_mod, "RESPAWN_MAX_DELAY", 0.2)
+    exe = tmp_path / "late-server"
+    b = StdioBackend("late", str(exe), [])
+    await b.start()
+    try:
+        assert not b.is_running
+        exe.write_text(f"#!{sys.executable}\n" + FAKE_SERVER)
+        exe.chmod(0o755)
+        r = await b.send_request(
+            "tools/call", {"name": "echo", "arguments": {"text": "late"}}, timeout=10
+        )
+        assert r["result"]["content"][0]["text"] == "late"
+        assert b.is_running
+    finally:
+        await b.stop()

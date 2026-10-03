@@ -20,6 +20,11 @@ STREAM_LIMIT = 64 * 1024 * 1024
 RESPAWN_BASE_DELAY = 0.5
 RESPAWN_MAX_DELAY = 30.0
 
+# How long a request waits for a down backend to come back before failing.
+# Short on purpose: a backend that cannot start should fail calls in seconds,
+# not hold every caller for the full request timeout.
+READY_WAIT_MAX = 15.0
+
 
 class BackendUnavailable(RuntimeError):
     """The child process died or could not be reached; the call can be retried."""
@@ -64,11 +69,25 @@ class StdioBackend:
         self._ready = asyncio.Event()
         self._respawn_task: asyncio.Task[None] | None = None
         self._consecutive_failures: int = 0
+        # Generation of the child that completed the MCP handshake; guards
+        # against handshaking the same child twice.
+        self._handshaken_gen: int = 0
 
     async def start(self) -> None:
-        """Spawn the stdio child process."""
+        """Spawn the stdio child process.
+
+        Never raises for a child that cannot launch (missing binary, bad
+        permissions): the failure is logged and retried with backoff, so one
+        broken server cannot stop the proxy from serving the others.
+        """
         self._stopping = False
-        await self._spawn()
+        try:
+            await self._spawn()
+        except OSError as exc:
+            logger.error(
+                "[%s] failed to start: %s; retrying with backoff", self.name, exc
+            )
+            self._schedule_respawn()
 
     async def _spawn(self) -> None:
         child_env = os.environ.copy()
@@ -145,8 +164,11 @@ class StdioBackend:
             reason,
             len(self._pending),
         )
-        self._ready.clear()
         self._fail_pending(BackendUnavailable(f"{self.name}: {reason}"))
+        self._schedule_respawn()
+
+    def _schedule_respawn(self) -> None:
+        self._ready.clear()
         if self._respawn_task is None or self._respawn_task.done():
             self._respawn_task = asyncio.create_task(
                 self._respawn(), name=f"{self.name}-respawn"
@@ -165,19 +187,24 @@ class StdioBackend:
             try:
                 await self._terminate(self._process)
                 await self._spawn()
-                if self._initialized:
-                    # Clients keep the cached init result; the new child still
-                    # needs its own handshake before it will serve tool calls.
-                    await self._request_raw(
-                        "initialize", self._init_params(), timeout=30
-                    )
-                    await self.send_notification("notifications/initialized")
+                # Clients keep any cached init result and never re-initialize;
+                # the new child still needs its own handshake before servers
+                # that enforce it will serve tool calls.
+                async with self._init_lock:
+                    if self._handshaken_gen != self._generation:
+                        response = await self._handshake()
+                        if not self._initialized:
+                            self._cache_init(response)
                 logger.info(
                     "[%s] respawned (attempt %d)", self.name, self._consecutive_failures
                 )
                 return
             except asyncio.CancelledError:
                 raise
+            except OSError as exc:
+                logger.warning("[%s] respawn failed: %s", self.name, exc)
+                self._ready.clear()
+                delay = min(RESPAWN_MAX_DELAY, delay * 2)
             except Exception:
                 logger.exception("[%s] respawn failed", self.name)
                 self._ready.clear()
@@ -291,16 +318,21 @@ class StdioBackend:
         """
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
-        if not self._ready.is_set():
-            try:
-                await asyncio.wait_for(self._ready.wait(), timeout=timeout)
-            except TimeoutError:
-                raise BackendUnavailable(
-                    f"{self.name}: respawn did not finish"
-                ) from None
+        await self._wait_ready(timeout)
         return await self._request_raw(
             method, params, timeout=max(0.1, deadline - loop.time())
         )
+
+    async def _wait_ready(self, timeout: float) -> None:
+        """Wait (briefly) for a down or respawning child to come back."""
+        if self._ready.is_set():
+            return
+        try:
+            await asyncio.wait_for(
+                self._ready.wait(), timeout=min(timeout, READY_WAIT_MAX)
+            )
+        except TimeoutError:
+            raise BackendUnavailable(f"{self.name}: not running") from None
 
     async def _request_raw(
         self, method: str, params: dict | None, timeout: float
@@ -339,6 +371,21 @@ class StdioBackend:
             "clientInfo": {"name": "mcp-proxy-mux", "version": "0.1.0"},
         }
 
+    async def _handshake(self) -> dict:
+        """Run the MCP initialize handshake against the current child."""
+        response = await self._request_raw(
+            "initialize", self._init_params(), timeout=30
+        )
+        await self.send_notification("notifications/initialized")
+        self._handshaken_gen = self._generation
+        return response
+
+    def _cache_init(self, response: dict) -> None:
+        self._initialized = True
+        self._init_result = response
+        server_info = response.get("result", {}).get("serverInfo", {})
+        logger.info("[%s] initialized: %s", self.name, server_info)
+
     async def initialize(self) -> dict:
         """Initialize the upstream server (cached after first call)."""
         async with self._init_lock:
@@ -346,16 +393,9 @@ class StdioBackend:
                 assert self._init_result is not None
                 return self._init_result
 
-            response = await self.send_request(
-                "initialize", self._init_params(), timeout=30
-            )
-
-            await self.send_notification("notifications/initialized")
-
-            self._initialized = True
-            self._init_result = response
-            server_info = response.get("result", {}).get("serverInfo", {})
-            logger.info("[%s] initialized: %s", self.name, server_info)
+            await self._wait_ready(30)
+            response = await self._handshake()
+            self._cache_init(response)
             return response
 
     @property
