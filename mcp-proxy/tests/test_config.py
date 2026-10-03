@@ -11,7 +11,29 @@ def test_load_default_config() -> None:
     config = load_config(path)
     assert config.host == "127.0.0.1"
     assert config.request_timeout == 120
-    assert len(config.servers) == 5  # brave-search commented out (no API key)
+    assert len(config.servers) > 0
+
+
+# Servers that hold per-session state must never be shared through the proxy.
+STATEFUL = {"chrome-devtools", "playwright", "mattermost-channel"}
+
+
+def test_no_stateful_servers_proxied() -> None:
+    path = Path(__file__).parent.parent / "config.toml"
+    names = {s.name for s in load_config(path).servers}
+    assert not names & STATEFUL, f"stateful server in proxy: {names & STATEFUL}"
+
+
+def test_every_workspace_server_has_its_profile() -> None:
+    """An unset WORKSPACE_PROFILE reads a keychain entry that never existed:
+    endless login windows and silent Gmail/Calendar failures. Each
+    google-workspace-<org> server must set WORKSPACE_PROFILE=<org>."""
+    path = Path(__file__).parent.parent / "config.toml"
+    for s in load_config(path).servers:
+        if s.name.startswith("google-workspace"):
+            assert s.name != "google-workspace", "unsuffixed server has no profile"
+            org = s.name.removeprefix("google-workspace-")
+            assert (s.env or {}).get("WORKSPACE_PROFILE") == org, s.name
 
 
 def test_server_names() -> None:

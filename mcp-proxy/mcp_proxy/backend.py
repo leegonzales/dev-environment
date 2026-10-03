@@ -10,9 +10,34 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# asyncio's default StreamReader limit is 64 KiB per line. One JSON-RPC
+# response routinely exceeds that (a Gmail message, a Sheets range, a base64
+# image), and an overrun kills the reader — after which every request from
+# every session hangs until it times out. Lines are bounded by this instead.
+STREAM_LIMIT = 64 * 1024 * 1024
+
+# Respawn backoff after the child dies: 0.5s, 1s, 2s ... capped at 30s.
+RESPAWN_BASE_DELAY = 0.5
+RESPAWN_MAX_DELAY = 30.0
+
+# How long a request waits for a down backend to come back before failing.
+# Short on purpose: a backend that cannot start should fail calls in seconds,
+# not hold every caller for the full request timeout.
+READY_WAIT_MAX = 15.0
+
+
+class BackendUnavailable(RuntimeError):
+    """The child process died or could not be reached; the call can be retried."""
+
 
 class StdioBackend:
-    """Spawn one stdio MCP server, multiplex N callers onto it via ID remapping."""
+    """Spawn one stdio MCP server, multiplex N callers onto it via ID remapping.
+
+    The child is supervised: if it exits or its stdout reader fails, in-flight
+    requests fail immediately and a fresh child is spawned (with backoff) and
+    re-initialized, so one bad tool call cannot take the server down for every
+    connected session.
+    """
 
     def __init__(
         self,
@@ -37,8 +62,34 @@ class StdioBackend:
         self._init_lock = asyncio.Lock()
         self._stderr_task: asyncio.Task[None] | None = None
 
+        # Supervision state. _generation identifies the current child so a
+        # stale reader from a replaced child cannot trigger a second respawn.
+        self._generation: int = 0
+        self._stopping: bool = False
+        self._ready = asyncio.Event()
+        self._respawn_task: asyncio.Task[None] | None = None
+        self._consecutive_failures: int = 0
+        # Generation of the child that completed the MCP handshake; guards
+        # against handshaking the same child twice.
+        self._handshaken_gen: int = 0
+
     async def start(self) -> None:
-        """Spawn the stdio child process."""
+        """Spawn the stdio child process.
+
+        Never raises for a child that cannot launch (missing binary, bad
+        permissions): the failure is logged and retried with backoff, so one
+        broken server cannot stop the proxy from serving the others.
+        """
+        self._stopping = False
+        try:
+            await self._spawn()
+        except OSError as exc:
+            logger.error(
+                "[%s] failed to start: %s; retrying with backoff", self.name, exc
+            )
+            self._schedule_respawn()
+
+    async def _spawn(self) -> None:
         child_env = os.environ.copy()
         if self.env:
             child_env.update(self.env)
@@ -50,50 +101,124 @@ class StdioBackend:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=child_env,
+            limit=STREAM_LIMIT,
         )
+        self._generation += 1
+        gen = self._generation
+        proc = self._process
         self._reader_task = asyncio.create_task(
-            self._read_loop(), name=f"{self.name}-reader"
+            self._read_loop(proc, gen), name=f"{self.name}-reader"
         )
         self._stderr_task = asyncio.create_task(
-            self._stderr_loop(), name=f"{self.name}-stderr"
+            self._stderr_loop(proc), name=f"{self.name}-stderr"
         )
-        logger.info("[%s] started PID %s", self.name, self._process.pid)
+        self._ready.set()
+        logger.info("[%s] started PID %s", self.name, proc.pid)
 
     async def stop(self) -> None:
         """Gracefully stop the child process."""
+        self._stopping = True
+        if self._respawn_task:
+            self._respawn_task.cancel()
         if self._reader_task:
             self._reader_task.cancel()
         if self._stderr_task:
             self._stderr_task.cancel()
-        if self._process and self._process.returncode is None:
-            try:
-                assert self._process.stdin
-                self._process.stdin.close()
-            except Exception:
-                pass
-            try:
-                await asyncio.wait_for(self._process.wait(), timeout=5)
-            except asyncio.TimeoutError:
-                self._process.terminate()
-                try:
-                    await asyncio.wait_for(self._process.wait(), timeout=3)
-                except asyncio.TimeoutError:
-                    self._process.kill()
+        await self._terminate(self._process)
 
-        for fut in self._pending.values():
-            if not fut.done():
-                fut.set_exception(RuntimeError("backend stopped"))
-        self._pending.clear()
+        self._fail_pending(BackendUnavailable("backend stopped"))
         logger.info("[%s] stopped", self.name)
+
+    async def _terminate(self, proc: asyncio.subprocess.Process | None) -> None:
+        if proc is None or proc.returncode is not None:
+            return
+        try:
+            assert proc.stdin
+            proc.stdin.close()
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5)
+        except TimeoutError:
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=3)
+            except TimeoutError:
+                proc.kill()
+
+    # ── supervision ──────────────────────────────────────
+
+    def _fail_pending(self, exc: Exception) -> None:
+        pending, self._pending = self._pending, {}
+        for fut in pending.values():
+            if not fut.done():
+                fut.set_exception(exc)
+
+    def _on_child_lost(self, gen: int, reason: str) -> None:
+        """Fail in-flight calls now and schedule a respawn of this child."""
+        if gen != self._generation or self._stopping:
+            return
+        logger.warning(
+            "[%s] child lost (%s); failing %d in-flight request(s)",
+            self.name,
+            reason,
+            len(self._pending),
+        )
+        self._fail_pending(BackendUnavailable(f"{self.name}: {reason}"))
+        self._schedule_respawn()
+
+    def _schedule_respawn(self) -> None:
+        self._ready.clear()
+        if self._respawn_task is None or self._respawn_task.done():
+            self._respawn_task = asyncio.create_task(
+                self._respawn(), name=f"{self.name}-respawn"
+            )
+
+    async def _respawn(self) -> None:
+        delay = min(
+            RESPAWN_MAX_DELAY,
+            RESPAWN_BASE_DELAY * (2**self._consecutive_failures),
+        )
+        self._consecutive_failures += 1
+        while not self._stopping:
+            await asyncio.sleep(delay)
+            if self._stopping:
+                return
+            try:
+                await self._terminate(self._process)
+                await self._spawn()
+                # Clients keep any cached init result and never re-initialize;
+                # the new child still needs its own handshake before servers
+                # that enforce it will serve tool calls.
+                async with self._init_lock:
+                    if self._handshaken_gen != self._generation:
+                        response = await self._handshake()
+                        if not self._initialized:
+                            self._cache_init(response)
+                logger.info(
+                    "[%s] respawned (attempt %d)", self.name, self._consecutive_failures
+                )
+                return
+            except asyncio.CancelledError:
+                raise
+            except OSError as exc:
+                logger.warning("[%s] respawn failed: %s", self.name, exc)
+                self._ready.clear()
+                delay = min(RESPAWN_MAX_DELAY, delay * 2)
+            except Exception:
+                logger.exception("[%s] respawn failed", self.name)
+                self._ready.clear()
+                delay = min(RESPAWN_MAX_DELAY, delay * 2)
 
     # ── stdio I/O ────────────────────────────────────────
 
-    async def _read_loop(self) -> None:
+    async def _read_loop(self, proc: asyncio.subprocess.Process, gen: int) -> None:
         """Read stdout line-by-line, dispatch responses by id."""
-        assert self._process and self._process.stdout
+        assert proc.stdout
+        reason = "stdout closed"
         try:
             while True:
-                line = await self._process.stdout.readline()
+                line = await proc.stdout.readline()
                 if not line:
                     logger.warning("[%s] stdout closed (process exited?)", self.name)
                     break
@@ -111,38 +236,67 @@ class StdioBackend:
                     fut = self._pending.pop(msg_id)
                     if not fut.done():
                         fut.set_result(msg)
+                    self._consecutive_failures = 0
                 elif msg_id is not None:
-                    logger.warning(
-                        "[%s] response for unknown id %s", self.name, msg_id
-                    )
+                    logger.warning("[%s] response for unknown id %s", self.name, msg_id)
                 else:
                     logger.debug(
                         "[%s] server notification: %s", self.name, msg.get("method")
                     )
         except asyncio.CancelledError:
-            pass
-        except Exception:
+            return
+        except Exception as exc:
             logger.exception("[%s] reader crashed", self.name)
+            reason = f"reader crashed: {exc}"
+        self._on_child_lost(gen, reason)
 
-    async def _stderr_loop(self) -> None:
-        """Drain stderr to logs (WARNING level so crashes are visible)."""
-        assert self._process and self._process.stderr
+    async def _stderr_loop(self, proc: asyncio.subprocess.Process) -> None:
+        """Drain stderr to logs (WARNING level so crashes are visible).
+
+        Reads fixed-size chunks rather than lines, so no line is ever too long
+        and the pipe always drains — a child blocked on a full stderr pipe
+        stops answering stdout, which hangs every session.
+        """
+        assert proc.stderr
+        buf = b""
         try:
             while True:
-                line = await self._process.stderr.readline()
-                if not line:
+                chunk = await proc.stderr.read(65536)
+                if not chunk:
                     break
-                logger.warning("[%s] stderr: %s", self.name, line.decode().rstrip())
+                buf += chunk
+                *lines, buf = buf.split(b"\n")
+                for raw in lines:
+                    logger.warning(
+                        "[%s] stderr: %s",
+                        self.name,
+                        raw[:2000].decode(errors="replace").rstrip(),
+                    )
+                if len(buf) > 65536:  # unterminated flood: log a slice, drop rest
+                    logger.warning(
+                        "[%s] stderr: %s…",
+                        self.name,
+                        buf[:2000].decode(errors="replace"),
+                    )
+                    buf = b""
         except asyncio.CancelledError:
             pass
+        except Exception:
+            logger.exception("[%s] stderr drain failed", self.name)
 
     async def _write(self, msg: dict) -> None:
         """Write one JSON-RPC message to stdin (serialized)."""
-        assert self._process and self._process.stdin
+        proc = self._process
+        if proc is None or proc.stdin is None or proc.returncode is not None:
+            raise BackendUnavailable(f"{self.name}: child not running")
         data = json.dumps(msg, separators=(",", ":")) + "\n"
         async with self._write_lock:
-            self._process.stdin.write(data.encode())
-            await self._process.stdin.drain()
+            try:
+                proc.stdin.write(data.encode())
+                await proc.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError) as exc:
+                self._on_child_lost(self._generation, f"stdin write failed: {exc}")
+                raise BackendUnavailable(f"{self.name}: {exc}") from exc
 
     # ── public API ───────────────────────────────────────
 
@@ -157,7 +311,33 @@ class StdioBackend:
         params: dict | None = None,
         timeout: float = 60,
     ) -> dict:
-        """Send a JSON-RPC request to the backend, return the response."""
+        """Send a JSON-RPC request to the backend, return the response.
+
+        If the child is down or respawning, waits for it for at most
+        ``min(timeout, READY_WAIT_MAX)`` before raising BackendUnavailable.
+        Raises BackendUnavailable immediately if the child dies mid-request.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        await self._wait_ready(timeout)
+        return await self._request_raw(
+            method, params, timeout=max(0.1, deadline - loop.time())
+        )
+
+    async def _wait_ready(self, timeout: float) -> None:
+        """Wait (briefly) for a down or respawning child to come back."""
+        if self._ready.is_set():
+            return
+        try:
+            await asyncio.wait_for(
+                self._ready.wait(), timeout=min(timeout, READY_WAIT_MAX)
+            )
+        except TimeoutError:
+            raise BackendUnavailable(f"{self.name}: not running") from None
+
+    async def _request_raw(
+        self, method: str, params: dict | None, timeout: float
+    ) -> dict:
         uid = self._alloc_id()
         msg: dict[str, Any] = {"jsonrpc": "2.0", "id": uid, "method": method}
         if params is not None:
@@ -170,18 +350,47 @@ class StdioBackend:
         try:
             await self._write(msg)
             return await asyncio.wait_for(fut, timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
+            self._pending.pop(uid, None)
+            raise
+        except BackendUnavailable:
             self._pending.pop(uid, None)
             raise
 
-    async def send_notification(
-        self, method: str, params: dict | None = None
-    ) -> None:
+    async def send_notification(self, method: str, params: dict | None = None) -> None:
         """Send a JSON-RPC notification (fire-and-forget)."""
         msg: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
         if params is not None:
             msg["params"] = params
         await self._write(msg)
+
+    @staticmethod
+    def _init_params() -> dict:
+        return {
+            "protocolVersion": "2025-03-26",
+            "capabilities": {},
+            "clientInfo": {"name": "mcp-proxy-mux", "version": "0.1.0"},
+        }
+
+    async def _handshake(self) -> dict:
+        """Run the MCP initialize handshake against the current child."""
+        response = await self._request_raw(
+            "initialize", self._init_params(), timeout=30
+        )
+        if "result" not in response:
+            # Never cache an error reply: it would be handed to every client
+            # for the life of the proxy. Raise so the caller retries later.
+            err = response.get("error", {}).get("message", "no result")
+            raise BackendUnavailable(f"{self.name}: initialize failed: {err}")
+        await self.send_notification("notifications/initialized")
+        self._handshaken_gen = self._generation
+        return response
+
+    def _cache_init(self, response: dict) -> None:
+        self._initialized = True
+        self._init_result = response
+        server_info = response.get("result", {}).get("serverInfo", {})
+        logger.info("[%s] initialized: %s", self.name, server_info)
 
     async def initialize(self) -> dict:
         """Initialize the upstream server (cached after first call)."""
@@ -190,19 +399,9 @@ class StdioBackend:
                 assert self._init_result is not None
                 return self._init_result
 
-            params = {
-                "protocolVersion": "2025-03-26",
-                "capabilities": {},
-                "clientInfo": {"name": "mcp-proxy-mux", "version": "0.1.0"},
-            }
-            response = await self.send_request("initialize", params, timeout=30)
-
-            await self.send_notification("notifications/initialized")
-
-            self._initialized = True
-            self._init_result = response
-            server_info = response.get("result", {}).get("serverInfo", {})
-            logger.info("[%s] initialized: %s", self.name, server_info)
+            await self._wait_ready(30)
+            response = await self._handshake()
+            self._cache_init(response)
             return response
 
     @property
