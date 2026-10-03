@@ -313,7 +313,8 @@ class StdioBackend:
     ) -> dict:
         """Send a JSON-RPC request to the backend, return the response.
 
-        If the child is being respawned, waits for it (within ``timeout``).
+        If the child is down or respawning, waits for it for at most
+        ``min(timeout, READY_WAIT_MAX)`` before raising BackendUnavailable.
         Raises BackendUnavailable immediately if the child dies mid-request.
         """
         loop = asyncio.get_running_loop()
@@ -376,6 +377,11 @@ class StdioBackend:
         response = await self._request_raw(
             "initialize", self._init_params(), timeout=30
         )
+        if "result" not in response:
+            # Never cache an error reply: it would be handed to every client
+            # for the life of the proxy. Raise so the caller retries later.
+            err = response.get("error", {}).get("message", "no result")
+            raise BackendUnavailable(f"{self.name}: initialize failed: {err}")
         await self.send_notification("notifications/initialized")
         self._handshaken_gen = self._generation
         return response

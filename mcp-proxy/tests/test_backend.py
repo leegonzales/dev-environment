@@ -315,3 +315,48 @@ async def test_backend_recovers_once_command_appears(
         assert b.is_running
     finally:
         await b.stop()
+
+
+FLAKY_INIT_SERVER = textwrap.dedent("""\
+    import json, sys
+
+    calls = 0
+    for line in sys.stdin:
+        req = json.loads(line)
+        rid = req.get("id")
+        if rid is None:
+            continue
+        if req.get("method") == "initialize":
+            calls += 1
+            if calls == 1:
+                out = {"jsonrpc": "2.0", "id": rid,
+                       "error": {"code": -32603, "message": "warming up"}}
+            else:
+                out = {"jsonrpc": "2.0", "id": rid, "result": {
+                    "protocolVersion": "2025-03-26", "capabilities": {},
+                    "serverInfo": {"name": "flaky", "version": "1"}}}
+            sys.stdout.write(json.dumps(out) + "\\n")
+            sys.stdout.flush()
+""")
+
+
+@pytest.mark.asyncio
+async def test_failed_initialize_is_not_cached(tmp_path: Path) -> None:
+    """An error reply to initialize must not be cached for every later client.
+
+    The proxy initializes eagerly at startup, so a transient startup error
+    would otherwise be served to all sessions forever.
+    """
+    script = tmp_path / "flaky.py"
+    script.write_text(FLAKY_INIT_SERVER)
+    b = StdioBackend("flaky", sys.executable, [str(script)])
+    await b.start()
+    try:
+        with pytest.raises(BackendUnavailable):
+            await b.initialize()
+        assert not b._initialized
+        r = await b.initialize()
+        assert r["result"]["serverInfo"]["name"] == "flaky"
+        assert (await b.initialize()) is r  # the good result is what gets cached
+    finally:
+        await b.stop()
