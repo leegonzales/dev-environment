@@ -18,9 +18,10 @@ args = ["/Users/leegonzales/Projects/leegonzales/google-workspace-mcp/workspace-
 env = { WORKSPACE_PROFILE = "personal" }
 port = 9100
 
-[servers.google-workspace]
+[servers.google-workspace-catalyst]
 command = "node"
 args = ["/Users/leegonzales/Projects/leegonzales/google-workspace-mcp/workspace-server/dist/index.js", "--debug"]
+env = { WORKSPACE_PROFILE = "catalyst" }
 port = 9101
 
 [servers.nanobanana-mcp]
@@ -31,13 +32,11 @@ env_files = ["~/.config/claude-env/gemini.env"]
 env = { NANOBANANA_OUTPUT_DIR = "/Users/leegonzales/.local/share/nanobanana/generated" }
 port = 9102
 
-# brave-search requires BRAVE_API_KEY — add to ~/.config/claude-env/brave.env
-# Get one at https://brave.com/search/api/
-# [servers.brave-search]
-# command = "npx"
-# args = ["-y", "@brave/brave-search-mcp-server"]
-# env_files = ["~/.config/claude-env/brave.env"]
-# port = 9103
+[servers.brave-search]
+command = "npx"
+args = ["-y", "@brave/brave-search-mcp-server"]
+env_files = ["~/.config/claude-env/brave.env"]
+port = 9103
 
 [servers.netlify]
 command = "npx"
@@ -49,3 +48,15 @@ command = "node"
 args = ["/Users/leegonzales/Projects/leegonzales/MCPServers/veo-mcp/dist/index.js"]
 env_files = ["~/.config/claude-env/gemini.env"]
 port = 9105
+
+[servers.google-workspace-difflab]
+command = "node"
+args = ["/Users/leegonzales/Projects/leegonzales/google-workspace-mcp/workspace-server/dist/index.js"]
+env = { WORKSPACE_PROFILE = "difflab" }
+port = 9106
+
+[servers.google-workspace-betterup]
+command = "node"
+args = ["/Users/leegonzales/Projects/leegonzales/google-workspace-mcp/workspace-server/dist/index.js"]
+env = { WORKSPACE_PROFILE = "betterup" }
+port = 9107
