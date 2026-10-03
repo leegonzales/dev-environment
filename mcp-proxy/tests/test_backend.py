@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 import textwrap
 from pathlib import Path
 
 import pytest
 
-from mcp_proxy.backend import StdioBackend
+from mcp_proxy.backend import BackendUnavailable, StdioBackend
 
 # A minimal fake MCP server that responds to JSON-RPC on stdin/stdout
 FAKE_SERVER = textwrap.dedent("""\
@@ -65,6 +64,26 @@ FAKE_SERVER = textwrap.dedent("""\
                     "id": rid,
                     "result": {"content": [{"type": "text", "text": args.get("text", "")}]},
                 })
+            elif name == "big":
+                # One JSON-RPC line far larger than asyncio's 64 KiB default.
+                respond({
+                    "jsonrpc": "2.0",
+                    "id": rid,
+                    "result": {"content": [{"type": "text", "text": "x" * args["size"]}]},
+                })
+            elif name == "stderr_flood":
+                # One huge stderr line, then a normal reply.
+                sys.stderr.write("E" * args["size"] + "\\n")
+                sys.stderr.flush()
+                respond({
+                    "jsonrpc": "2.0",
+                    "id": rid,
+                    "result": {"content": [{"type": "text", "text": "survived"}]},
+                })
+            elif name == "die":
+                # Crash mid-request without replying.
+                import os
+                os._exit(1)
             else:
                 respond({
                     "jsonrpc": "2.0",
@@ -168,3 +187,74 @@ async def test_unknown_tool_returns_error(backend: StdioBackend) -> None:
     )
     assert "error" in result
     assert result["error"]["code"] == -32601
+
+
+# ── Resilience: one bad response or crash must not take the backend down ──
+
+
+@pytest.mark.asyncio
+async def test_response_line_over_64k_is_delivered(backend: StdioBackend) -> None:
+    """A single response line larger than 64 KiB must arrive intact."""
+    await backend.initialize()
+    size = 1_000_000
+    r = await backend.send_request(
+        "tools/call", {"name": "big", "arguments": {"size": size}}, timeout=10
+    )
+    assert len(r["result"]["content"][0]["text"]) == size
+
+
+@pytest.mark.asyncio
+async def test_backend_still_serves_after_large_response(backend: StdioBackend) -> None:
+    await backend.initialize()
+    await backend.send_request(
+        "tools/call", {"name": "big", "arguments": {"size": 500_000}}, timeout=10
+    )
+    r = await backend.send_request(
+        "tools/call", {"name": "echo", "arguments": {"text": "after"}}, timeout=5
+    )
+    assert r["result"]["content"][0]["text"] == "after"
+
+
+@pytest.mark.asyncio
+async def test_huge_stderr_line_does_not_hang(backend: StdioBackend) -> None:
+    await backend.initialize()
+    r = await backend.send_request(
+        "tools/call",
+        {"name": "stderr_flood", "arguments": {"size": 1_000_000}},
+        timeout=10,
+    )
+    assert r["result"]["content"][0]["text"] == "survived"
+    r = await backend.send_request(
+        "tools/call", {"name": "echo", "arguments": {"text": "ok"}}, timeout=5
+    )
+    assert r["result"]["content"][0]["text"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_child_exit_fails_pending_request_fast(backend: StdioBackend) -> None:
+    """A crash mid-request must fail the caller now, not after the timeout."""
+    await backend.initialize()
+    loop = asyncio.get_running_loop()
+    t0 = loop.time()
+    with pytest.raises(BackendUnavailable):
+        await backend.send_request(
+            "tools/call", {"name": "die", "arguments": {}}, timeout=30
+        )
+    assert loop.time() - t0 < 5
+
+
+@pytest.mark.asyncio
+async def test_backend_respawns_after_child_exit(backend: StdioBackend) -> None:
+    """After the child dies, the next request is served by a fresh child."""
+    await backend.initialize()
+    first_pid = backend._process.pid
+    with pytest.raises(BackendUnavailable):
+        await backend.send_request(
+            "tools/call", {"name": "die", "arguments": {}}, timeout=30
+        )
+    r = await backend.send_request(
+        "tools/call", {"name": "echo", "arguments": {"text": "reborn"}}, timeout=15
+    )
+    assert r["result"]["content"][0]["text"] == "reborn"
+    assert backend._process.pid != first_pid
+    assert backend.is_running
