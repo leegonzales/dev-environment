@@ -8,7 +8,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 TRIM="$HERE/trim-log.sh"
 T=$(mktemp -d)
 cleanup() {
-    rm -f "$T/big.log" "$T/big.log.1" "$T/small.log" "$T/small.log.1"
+    rm -f "$T/big.log" "$T/big.log.1" "$T/small.log" "$T/small.log.1" \
+        "$T/a.log" "$T/a.log.1" "$T/b.log" "$T/b.log.1"
     rmdir "$T" 2>/dev/null
 }
 trap cleanup EXIT
@@ -21,7 +22,7 @@ f="$T/big.log"
 awk 'BEGIN{for(i=0;i<60000;i++) printf "line %06d padding-padding-padding-padding\n", i}' > "$f"
 ino=$(stat -f %i "$f")
 last=$(tail -n 1 "$f")
-sh "$TRIM" "$f" 1 1
+sh "$TRIM" 1 1 "$f"
 check "live log emptied"                         '[ "$(stat -f %z "$f")" -eq 0 ]'
 check "same inode (append writers keep working)" '[ "$(stat -f %i "$f")" = "$ino" ]'
 check ".1 holds at most the keep size"           '[ "$(stat -f %z "$f.1")" -le "$(mb 1)" ]'
@@ -30,16 +31,27 @@ check ".1 starts on a whole line"                'head -n 1 "$f.1" | grep -q "^l
 
 # Under the limit: untouched.
 s="$T/small.log"; printf 'tiny\n' > "$s"
-sh "$TRIM" "$s" 1 1
+sh "$TRIM" 1 1 "$s"
 check "small log untouched"                      '[ "$(cat "$s")" = "tiny" ]'
 check "no .1 for small log"                      '[ ! -e "$s.1" ]'
 
 # Missing file: no error.
-sh "$TRIM" "$T/nope.log" 1 1; rc=$?
+sh "$TRIM" 1 1 "$T/nope.log"; rc=$?
 check "missing file exits 0"                     '[ "$rc" -eq 0 ]'
 
+# Several files in one run: each is capped on its own; a missing one is skipped.
+a="$T/a.log"; b="$T/b.log"
+awk 'BEGIN{for(i=0;i<60000;i++) printf "a %06d padding-padding-padding-padding\n", i}' > "$a"
+printf 'tiny\n' > "$b"
+sh "$TRIM" 1 1 "$a" "$T/nope.log" "$b"; rc=$?
+check "multi-file run exits 0"                   '[ "$rc" -eq 0 ]'
+check "big file in the list is capped"           '[ "$(stat -f %z "$a")" -eq 0 ] && [ -s "$a.1" ]'
+check "small file after a missing one untouched" '[ "$(cat "$b")" = "tiny" ] && [ ! -e "$b.1" ]'
+
 # Bad arguments: refuse.
-sh "$TRIM" "$f" 1 2 >/dev/null 2>&1; rc=$?
+sh "$TRIM" 1 2 "$f" >/dev/null 2>&1; rc=$?
 check "keep > max is rejected"                   '[ "$rc" -ne 0 ]'
+sh "$TRIM" 1 1 >/dev/null 2>&1; rc=$?
+check "no files is rejected"                     '[ "$rc" -ne 0 ]'
 
 exit $fail

@@ -4,7 +4,8 @@
      50 MB keeps its newest 10 MB in <log>.1 and is emptied in place.
      Only list logs whose writer opens them in append mode; see the header of
      launchd/bin/trim-log.sh. cass-index.log grows ~14 MB/day and reached
-     609 MB during the 2026-09 watch loop. -->
+     609 MB during the 2026-09 watch loop. The servitor daemon's stdout/stderr
+     had no rotation; daemon.err reached 32 MB by 2026-10-03. -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
@@ -13,9 +14,11 @@
     <array>
         <string>/bin/sh</string>
         <string>/Users/__USERNAME__/Projects/leegonzales/dev-environment/launchd/bin/trim-log.sh</string>
-        <string>/Users/__USERNAME__/Library/Logs/cass-index.log</string>
         <string>50</string>
         <string>10</string>
+        <string>/Users/__USERNAME__/Library/Logs/cass-index.log</string>
+        <string>/Users/__USERNAME__/.servitor/daemon.err</string>
+        <string>/Users/__USERNAME__/.servitor/daemon.log</string>
     </array>
     <key>StartInterval</key>
     <integer>21600</integer>

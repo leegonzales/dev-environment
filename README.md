@@ -26,7 +26,7 @@ Then complete the manual steps printed by the script (API keys, plugin installs,
 - `com.cass.semantic-reindex.plist` — Nightly semantic reindex (3 AM)
 - `com.claude-speak.daemon.plist` — Kokoro TTS daemon (Apple Silicon)
 - `com.mcp-proxy-mux.daemon.plist` — Shared MCP proxy (`mcp-proxy/`): one process per stateless server for every Claude session, instead of one per session
-- `com.dev-environment.log-trim.plist` — Every 6h, caps `cass-index.log` at 50 MB (keeps the newest 10 MB in `.1`). Uses `bin/trim-log.sh`; test with `sh launchd/bin/test-trim-log.sh`
+- `com.dev-environment.log-trim.plist` — Every 6h, caps `cass-index.log` and the servitor daemon's `~/.servitor/daemon.{err,log}` at 50 MB each (keeps the newest 10 MB in `.1`). Uses `bin/trim-log.sh`; test with `sh launchd/bin/test-trim-log.sh`
 
 ### `shell/` — Shell Configuration
 - `ai-tools.zsh` — AI tool aliases and PATH config (source from `.zshrc`)
