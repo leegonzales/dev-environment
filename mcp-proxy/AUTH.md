@@ -11,6 +11,13 @@ loopback, including containers on this Mac (via `host.docker.internal`). Bead se
 | `audit` (default) | Serves every request. Counts requests with no valid token (`unauth_absent`, `unauth_invalid`) and with a foreign Host header (`bad_host`). Blocks nothing. |
 | `enforce` | Missing or wrong token: 401. Host not `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`: 421. `/health` shows only status to a caller without the token. |
 
+**Watch in the audit window: containers.** The Host check expects `127.0.0.1:<port>`,
+`localhost:<port>` or `[::1]:<port>`. A container that reaches the proxy through
+`host.docker.internal:<port>` sends a different Host, so it shows up as `bad_host` in audit and
+gets 421 under `enforce`. If `--status` shows `bad_host` above 0 after every pane has switched,
+find the client before flipping to `enforce`: either it should not be using the proxy, or it must
+send `Host: 127.0.0.1:<port>`. A container with no business here is the case this check exists for.
+
 A mode other than these three stops the proxy at load (no silent fallback). `enforce` with a
 missing, empty, short (under 20 characters) or group/other-readable token file stops it at start
 (exit 2) before any backend is spawned.

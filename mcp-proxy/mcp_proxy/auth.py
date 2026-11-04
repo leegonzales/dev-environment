@@ -104,7 +104,10 @@ class TokenStore:
         if state == self._state:
             return
         if state:
-            logger.warning("auth: %s; requests that need a token will be refused", state)
+            logger.warning(
+                "auth: %s; a server in enforce mode refuses requests until fixed",
+                state,
+            )
         else:
             logger.info("auth: token file usable again: %s", self.path)
         self._state = state
