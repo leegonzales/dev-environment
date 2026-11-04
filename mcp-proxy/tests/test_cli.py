@@ -202,3 +202,67 @@ async def test_status_sends_the_token_and_shows_counts(tmp_path: Path, fake_scri
     assert "ok" in out and "auth=enforce" in out and "unauth=0" in out
     assert "PID" in out
     assert "k" * 32 not in out
+
+
+def _run_main(monkeypatch, argv: list[str]) -> int:
+    from mcp_proxy import cli
+
+    async def must_not_run(config):
+        raise AssertionError("run() was reached: the auth check did not stop main()")
+
+    monkeypatch.setattr(cli, "run", must_not_run)
+    monkeypatch.setattr(sys, "argv", ["mcp-proxy-mux", *argv])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    return exc.value.code
+
+
+def _config_file(tmp_path: Path, token: Path, marker: Path, extra: str = "") -> Path:
+    spawn = tmp_path / "spawn.py"
+    spawn.write_text(f"open({str(marker)!r}, 'w').write('ran')\n")
+    cfg = tmp_path / "c.toml"
+    cfg.write_text(
+        f'[proxy]\nauth = "enforce"\ntoken_file = "{token}"\n\n'
+        f'[servers.a]\ncommand = "{sys.executable}"\nargs = ["{spawn}"]\nport = {_free_port()}\n'
+        + extra
+    )
+    return cfg
+
+
+@pytest.mark.parametrize("mode", [None, 0o644])
+def test_main_exits_2_and_spawns_nothing_when_enforce_has_no_usable_token(
+    tmp_path: Path, monkeypatch, capsys, mode
+) -> None:
+    token = tmp_path / "tok"
+    if mode is not None:
+        _tok(token, mode=mode)
+    marker = tmp_path / "marker"
+    cfg = _config_file(tmp_path, token, marker)
+    assert _run_main(monkeypatch, ["-c", str(cfg)]) == 2
+    err = capsys.readouterr().err
+    assert "auth=enforce" in err and "[a]" in err
+    assert not marker.exists(), "a backend was spawned before the auth check"
+
+
+def test_main_server_filter_only_checks_the_selected_server(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    marker = tmp_path / "marker"
+    cfg = _config_file(
+        tmp_path,
+        tmp_path / "none",
+        marker,
+        extra=f'\n[servers.b]\ncommand = "cat"\nport = {_free_port()}\nauth = "off"\n',
+    )
+    # b does not enforce, so selecting it must not be refused for the missing token.
+    from mcp_proxy import cli
+
+    seen = {}
+
+    async def fake_run(config):
+        seen["servers"] = [s.name for s in config.servers]
+
+    monkeypatch.setattr(cli, "run", fake_run)
+    monkeypatch.setattr(sys, "argv", ["mcp-proxy-mux", "-c", str(cfg), "--server", "b"])
+    cli.main()
+    assert seen["servers"] == ["b"]

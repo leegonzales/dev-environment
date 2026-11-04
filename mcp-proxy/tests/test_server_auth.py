@@ -272,3 +272,85 @@ async def test_logs_never_hold_a_token(tmp_path, token_file, caplog):
         await backend.stop()
     assert TOKEN not in caplog.text
     assert "leaked-value" not in caplog.text
+
+
+# ── round-2 additions (gate GATE-mcp-auth.md B1) ─────────
+
+
+async def raw_request(port: int, head: bytes, body: bytes = b"") -> int:
+    """Send raw bytes and return the HTTP status code."""
+    import asyncio
+
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    writer.write(head + body)
+    await writer.drain()
+    line = await asyncio.wait_for(reader.readline(), 10)
+    writer.close()
+    return int(line.split()[1])
+
+
+def raw_post(port: int, auth: bytes) -> tuple[bytes, bytes]:
+    import json as _json
+
+    body = _json.dumps(list_body()).encode()
+    head = (
+        b"POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:%d\r\n" % port
+        + b"Content-Type: application/json\r\n"
+        + b"Authorization: " + auth + b"\r\n"
+        + b"Content-Length: %d\r\n\r\n" % len(body)
+    )
+    return head, body
+
+
+NON_UTF8 = b"Bearer \xff\xfe" + b"a" * 30
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode,expected", [("off", 200), ("audit", 200), ("enforce", 401)])
+async def test_non_utf8_authorization_header_never_crashes(
+    tmp_path, token_file, mode, expected
+):
+    port = PORT + 20 + ["off", "audit", "enforce"].index(mode)
+    backend, server, auth = await run_server(tmp_path, mode, port, token_file)
+    try:
+        head, body = raw_post(port, NON_UTF8)
+        assert await raw_request(port, head, body) == expected
+        if mode != "off":
+            assert auth.snapshot()["unauth_invalid"] == 1
+    finally:
+        await server.stop()
+        await backend.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["audit", "enforce"])
+async def test_non_utf8_header_on_health_gives_200(tmp_path, token_file, mode):
+    port = PORT + 30 + ["audit", "enforce"].index(mode)
+    backend, server, auth = await run_server(tmp_path, mode, port, token_file)
+    try:
+        head = (
+            b"GET /health HTTP/1.1\r\nHost: 127.0.0.1:%d\r\n" % port
+            + b"Authorization: " + NON_UTF8 + b"\r\n\r\n"
+        )
+        assert await raw_request(port, head) == 200
+    finally:
+        await server.stop()
+        await backend.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_failure_inside_the_check_serves_in_audit_and_denies_in_enforce(
+    tmp_path, token_file, monkeypatch
+):
+    def boom(self, header):
+        raise RuntimeError("check exploded")
+
+    monkeypatch.setattr(Authenticator, "_check_inner", boom, raising=False)
+    for mode, port, expected in (("audit", PORT + 40, 200), ("enforce", PORT + 41, 401)):
+        backend, server, auth = await run_server(tmp_path, mode, port, token_file)
+        try:
+            status, _ = await post(port, list_body(), {"Authorization": f"Bearer {TOKEN}"})
+            assert status == expected, mode
+        finally:
+            await server.stop()
+            await backend.stop()

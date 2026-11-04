@@ -36,11 +36,17 @@ def parse_bearer(header: str | None) -> str | None:
     """Return the token from an ``Authorization: Bearer <token>`` value."""
     if not header:
         return None
-    scheme, _, rest = header.strip().partition(" ")
-    if scheme.lower() != "bearer":
+    parts = header.strip().split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
         return None
-    token = rest.strip()
-    return token or None
+    return parts[1].strip() or None
+
+
+def _b(value: str) -> bytes:
+    """Bytes for a header or file value. aiohttp hands non-UTF-8 header bytes
+    over as lone surrogates; ``surrogateescape`` turns them back into bytes
+    instead of raising."""
+    return value.encode("utf-8", "surrogateescape")
 
 
 def _file_problem(path: Path) -> str | None:
@@ -59,7 +65,7 @@ def _file_problem(path: Path) -> str | None:
 def _read_token(path: Path) -> str | None:
     try:
         value = path.read_text().strip()
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return None
     return value if len(value) >= MIN_TOKEN_LEN else None
 
@@ -71,7 +77,8 @@ class TokenStore:
         self.path = Path(path)
         self.prev_path = self.path.with_name(self.path.name + ".prev")
         self._clock = clock
-        self._cache: dict[Path, tuple[tuple[int, int], str | None]] = {}
+        self._cache: dict[Path, tuple[tuple[int, ...], str | None]] = {}
+        self._state: str | None = None  # last logged problem with the current file
 
     def _load(self, path: Path) -> str | None:
         """Token from a trusted file, cached until the file changes."""
@@ -82,13 +89,25 @@ class TokenStore:
             st = path.stat()
         except OSError:
             return None
-        key = (st.st_mtime_ns, st.st_ino)
+        key = (st.st_mtime_ns, st.st_ctime_ns, st.st_ino, st.st_size)
         hit = self._cache.get(path)
         if hit and hit[0] == key:
             return hit[1]
         token = _read_token(path)
         self._cache[path] = (key, token)
         return token
+
+    def _note_state(self, token: str | None) -> None:
+        """Log (path and reason only, never content) when the current token
+        file becomes unusable or usable again, once per change."""
+        state = None if token else (_file_problem(self.path) or "token file empty or too short")
+        if state == self._state:
+            return
+        if state:
+            logger.warning("auth: %s; requests that need a token will be refused", state)
+        else:
+            logger.info("auth: token file usable again: %s", self.path)
+        self._state = state
 
     def problem(self) -> str | None:
         """Why the current token file is unusable, or None."""
@@ -106,10 +125,13 @@ class TokenStore:
     def _candidates(self) -> list[str]:
         out: list[str] = []
         cur = self._load(self.path)
+        self._note_state(cur)
         if cur:
             out.append(cur)
         try:
-            fresh = self._clock() - self.prev_path.stat().st_mtime <= PREV_GRACE_S
+            # ctime, not mtime: `mv token token.prev` keeps the old mtime but
+            # updates ctime, so the grace runs from the rotation.
+            fresh = self._clock() - self.prev_path.stat().st_ctime <= PREV_GRACE_S
         except OSError:
             fresh = False
         if fresh:
@@ -121,11 +143,11 @@ class TokenStore:
     def verify(self, presented: str) -> bool:
         if not presented:
             return False
-        got = presented.encode()
+        got = _b(presented)
         ok = False
         # Compare against every candidate: no early exit on a match.
         for cand in self._candidates():
-            if hmac.compare_digest(got, cand.encode()):
+            if hmac.compare_digest(got, _b(cand)):
                 ok = True
         return ok
 
@@ -154,7 +176,18 @@ class Authenticator:
         return bool(host) and host.lower() in self._allowed_hosts
 
     def check(self, header: str | None) -> str:
-        """``ok``, ``absent`` (no usable Bearer header) or ``invalid``."""
+        """``ok``, ``absent`` (no usable Bearer header) or ``invalid``.
+
+        Total: an unexpected error counts as ``invalid`` (audit still serves
+        the request; enforce refuses it). Only the exception class is logged.
+        """
+        try:
+            return self._check_inner(header)
+        except Exception as exc:  # noqa: BLE001 - must never crash a request
+            logger.error("[%s] auth check failed: %s", self.name, exc.__class__.__name__)
+            return "invalid"
+
+    def _check_inner(self, header: str | None) -> str:
         presented = parse_bearer(header)
         if presented is None:
             return "absent"

@@ -196,3 +196,67 @@ def test_counting_never_logs_the_token(tmp_path: Path, caplog) -> None:
     a.check(f"Bearer {OTHER}")
     assert TOKEN not in caplog.text
     assert OTHER not in caplog.text
+
+
+# ── round-2 additions (gate GATE-mcp-auth.md S1, S3, N2, N5) ──
+
+
+def test_verify_survives_lone_surrogates(tmp_path: Path) -> None:
+    p = tmp_path / "token"
+    write_token(p, TOKEN)
+    store = TokenStore(p)
+    assert store.verify("\udcff\udcfe" + "a" * 30) is False
+
+
+def test_check_survives_lone_surrogates(tmp_path: Path) -> None:
+    a = make(tmp_path, "audit")
+    assert a.check("Bearer \udcff\udcfe" + "a" * 30) == "invalid"
+
+
+def test_prev_grace_counts_from_the_rename_not_from_the_old_mtime(tmp_path: Path) -> None:
+    """`mv token token.prev` keeps the old mtime; the grace must still run."""
+    p = tmp_path / "token"
+    prev = tmp_path / "token.prev"
+    write_token(p, TOKEN)
+    three_days = 3 * 24 * 3600
+    old = p.stat().st_mtime - three_days
+    os.utime(p, (old, old))
+    os.rename(p, prev)  # keeps the 3-day-old mtime
+    write_token(p, OTHER)
+    store = TokenStore(p)
+    assert store.verify(OTHER)
+    assert store.verify(TOKEN), "old token must be accepted just after a rename"
+
+
+def test_edit_in_place_with_the_same_mtime_is_seen(tmp_path: Path) -> None:
+    p = tmp_path / "token"
+    write_token(p, TOKEN)
+    st = p.stat()
+    store = TokenStore(p)
+    assert store.verify(TOKEN)
+    p.write_text("n" * 33 + "\n")  # different size, then put the mtime back
+    os.chmod(p, 0o600)
+    os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns))
+    assert store.verify("n" * 33)
+    assert not store.verify(TOKEN)
+
+
+def test_parse_bearer_splits_on_any_whitespace() -> None:
+    assert parse_bearer("Bearer\tabc") == "abc"
+
+
+def test_a_vanished_token_file_is_logged_once_with_the_reason(tmp_path: Path, caplog) -> None:
+    caplog.set_level("INFO")
+    p = tmp_path / "token"
+    write_token(p, TOKEN)
+    store = TokenStore(p)
+    assert store.verify(TOKEN)
+    p.unlink()
+    assert not store.verify(TOKEN)
+    assert not store.verify(TOKEN)
+    msgs = [r.getMessage() for r in caplog.records if "token file" in r.getMessage()]
+    assert len(msgs) == 1 and "missing" in msgs[0] and str(p) in msgs[0]
+    assert TOKEN not in caplog.text
+    write_token(p, TOKEN)
+    assert store.verify(TOKEN)
+    assert any("usable again" in r.getMessage() for r in caplog.records)

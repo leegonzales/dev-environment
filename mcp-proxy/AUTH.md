@@ -17,9 +17,12 @@ missing, empty, short (under 20 characters) or group/other-readable token file s
 
 ## Token file
 
-`token_file` under `[proxy]`, default `~/.config/mcp-proxy/token`, mode 0600. The proxy re-reads it
-when it changes, so rotation needs no restart. `<token_file>.prev` (0600) is also accepted for 24 h
-after it was written. The token is never logged, printed, or returned.
+`token_file` under `[proxy]`, default `~/.config/mcp-proxy/token`, mode 0600, absolute path (a
+relative one is refused: launchd starts the proxy in `/`). The proxy re-reads it when it changes,
+so rotation needs no restart. `<token_file>.prev` (0600) is also accepted for 24 h from the moment
+it was created or renamed (the file's change time, so `mv` counts). The token is never logged,
+printed, or returned. If the file is deleted, loosened or emptied while the proxy runs, `enforce`
+refuses every request and the log says why (path and reason, once per change).
 
 Create (once):
 
@@ -61,3 +64,10 @@ Rollback: set `auth = "off"` (or `"audit"`) and restart the proxy; clients need 
 
 Code running as the same user can read the token file. This stops other accounts, containers,
 sandboxed tools and DNS-rebinding pages, not a process running as you.
+
+A container that bind-mounts your home directory can read the token file, and one that inherits
+your environment (`docker run -e MCP_PROXY_TOKEN`, `--env-file`) gets the token. Keep the token out
+of container mounts and env passthrough.
+
+An event stream opened before a rotation keeps running after the old token expires (the check runs
+per request). `/health` in `audit` also lists the counters; only the extra keys differ from `off`.

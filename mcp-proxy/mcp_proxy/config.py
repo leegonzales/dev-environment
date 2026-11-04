@@ -74,6 +74,10 @@ def load_config(path: Path) -> ProxyConfig:
     token_file = Path(
         proxy_section.get("token_file", str(DEFAULT_TOKEN_FILE))
     ).expanduser()
+    if not token_file.is_absolute():
+        # launchd starts the proxy with cwd "/", so a relative path would
+        # silently point somewhere else.
+        raise ValueError(f"[proxy]: token_file must be an absolute path, got {token_file}")
 
     servers: list[ServerConfig] = []
     for name, cfg in raw.get("servers", {}).items():

@@ -114,3 +114,12 @@ def test_bad_per_server_auth_mode_fails_loudly(tmp_path: Path) -> None:
     toml.write_text('[servers.a]\ncommand = "cat"\nport = 9999\nauth = "nope"\n')
     with pytest.raises(ValueError, match="auth"):
         load_config(toml)
+
+
+def test_relative_token_file_is_rejected(tmp_path: Path) -> None:
+    toml = tmp_path / "t.toml"
+    toml.write_text(
+        '[proxy]\ntoken_file = "token"\n\n[servers.a]\ncommand = "cat"\nport = 9999\n'
+    )
+    with pytest.raises(ValueError, match="token_file"):
+        load_config(toml)
