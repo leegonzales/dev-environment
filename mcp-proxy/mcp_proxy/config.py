@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .auth import DEFAULT_TOKEN_FILE, MODES
+
 if sys.version_info >= (3, 11):
     import tomllib
 else:
@@ -20,6 +22,7 @@ class ServerConfig:
     args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
     port: int = 9100
+    auth: str | None = None  # None: use [proxy] auth
 
 
 @dataclass
@@ -27,6 +30,17 @@ class ProxyConfig:
     host: str = "127.0.0.1"
     request_timeout: float = 60.0
     servers: list[ServerConfig] = field(default_factory=list)
+    auth: str = "audit"
+    token_file: Path = DEFAULT_TOKEN_FILE
+
+    def auth_for(self, server: ServerConfig) -> str:
+        return server.auth or self.auth
+
+
+def _check_mode(mode: Any, where: str) -> str:
+    if mode not in MODES:
+        raise ValueError(f"{where}: auth must be one of {MODES}, got {mode!r}")
+    return mode
 
 
 def _load_env_file(path_str: str) -> dict[str, str]:
@@ -56,6 +70,10 @@ def load_config(path: Path) -> ProxyConfig:
     proxy_section: dict[str, Any] = raw.get("proxy", {})
     host = proxy_section.get("host", "127.0.0.1")
     timeout = proxy_section.get("request_timeout", 60.0)
+    auth = _check_mode(proxy_section.get("auth", "audit"), "[proxy]")
+    token_file = Path(
+        proxy_section.get("token_file", str(DEFAULT_TOKEN_FILE))
+    ).expanduser()
 
     servers: list[ServerConfig] = []
     for name, cfg in raw.get("servers", {}).items():
@@ -73,7 +91,18 @@ def load_config(path: Path) -> ProxyConfig:
                 args=cfg.get("args", []),
                 env=env,
                 port=cfg["port"],
+                auth=(
+                    _check_mode(cfg["auth"], f"[servers.{name}]")
+                    if "auth" in cfg
+                    else None
+                ),
             )
         )
 
-    return ProxyConfig(host=host, request_timeout=timeout, servers=servers)
+    return ProxyConfig(
+        host=host,
+        request_timeout=timeout,
+        servers=servers,
+        auth=auth,
+        token_file=token_file,
+    )

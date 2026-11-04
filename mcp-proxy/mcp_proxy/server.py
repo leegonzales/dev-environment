@@ -8,9 +8,15 @@ import uuid
 
 from aiohttp import web
 
+from .auth import Authenticator
 from .backend import StdioBackend
 
 logger = logging.getLogger(__name__)
+
+UNAUTHORIZED_TEXT = (
+    "mcp-proxy: a token is required. This client was started without one: "
+    "restart the pane, or run /mcp reconnect after the client config is updated."
+)
 
 
 class McpHttpServer:
@@ -22,14 +28,16 @@ class McpHttpServer:
         host: str,
         port: int,
         request_timeout: float = 60,
+        auth: Authenticator | None = None,
     ) -> None:
         self.backend = backend
         self.host = host
         self.port = port
         self.request_timeout = request_timeout
+        self.auth = auth  # None behaves as mode "off"
         self._sessions: set[str] = set()
 
-        self._app = web.Application()
+        self._app = web.Application(middlewares=[self._auth_middleware])
         self._app.router.add_post("/mcp", self.handle_post)
         self._app.router.add_get("/mcp", self.handle_get)
         self._app.router.add_delete("/mcp", self.handle_delete)
@@ -52,21 +60,58 @@ class McpHttpServer:
         if self._runner:
             await self._runner.cleanup()
 
+    # ── Auth ─────────────────────────────────────────────
+
+    @web.middleware
+    async def _auth_middleware(self, request: web.Request, handler):
+        a = self.auth
+        if a is None or a.mode == "off":
+            return await handler(request)
+
+        if request.path == "/health":
+            # Open for status checks; handle_health decides how much to show.
+            verdict = a.check(request.headers.get("Authorization"))
+            request["token_ok"] = verdict == "ok"
+            return await handler(request)
+
+        enforcing = a.mode == "enforce"
+        if not a.host_ok(request.headers.get("Host")):
+            a.count("bad_host")
+            if enforcing:
+                return web.Response(
+                    status=421, text="mcp-proxy: unexpected Host header"
+                )
+
+        verdict = a.check(request.headers.get("Authorization"))
+        if verdict != "ok":
+            a.count(verdict)
+            if enforcing:
+                return web.Response(
+                    status=401,
+                    text=UNAUTHORIZED_TEXT,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+        return await handler(request)
+
     # ── Handlers ─────────────────────────────────────────
 
     async def handle_health(self, request: web.Request) -> web.Response:
-        return web.json_response(
-            {
-                "status": "ok" if self.backend.is_running else "down",
-                "server": self.backend.name,
-                "pid": (
-                    self.backend._process.pid
-                    if self.backend._process
-                    else None
-                ),
-                "sessions": len(self._sessions),
-            }
-        )
+        body: dict = {
+            "status": "ok" if self.backend.is_running else "down",
+            "server": self.backend.name,
+        }
+        a = self.auth
+        if a is not None and a.mode != "off":
+            body["auth"] = a.mode
+        # Backend pid, session count and auth counters only go to an
+        # authenticated caller when the proxy enforces; otherwise as before.
+        if a is not None and a.mode == "enforce" and not request.get("token_ok"):
+            return web.json_response(body)
+        body["pid"] = self.backend._process.pid if self.backend._process else None
+        body["sessions"] = len(self._sessions)
+        if a is not None and a.mode != "off":
+            body.update({k: v for k, v in a.snapshot().items() if k != "auth"})
+        return web.json_response(body)
 
     async def handle_post(self, request: web.Request) -> web.Response:
         if request.content_type != "application/json":

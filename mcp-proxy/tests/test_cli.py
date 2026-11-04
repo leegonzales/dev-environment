@@ -117,3 +117,88 @@ async def test_backends_are_initialized_eagerly(fake_script: Path) -> None:
         assert backend._initialized, "proxy did not initialize the backend itself"
     finally:
         await stop_all(pairs)
+
+
+# ── auth wiring ──────────────────────────────────────────
+
+import os  # noqa: E402
+
+from mcp_proxy.cli import auth_problems, build_authenticators  # noqa: E402
+
+
+def _tok(path: Path, value: str = "k" * 32, mode: int = 0o600) -> Path:
+    path.write_text(value + "\n")
+    os.chmod(path, mode)
+    return path
+
+
+def test_enforce_with_missing_token_is_refused(tmp_path: Path) -> None:
+    config = ProxyConfig(
+        auth="enforce",
+        token_file=tmp_path / "none",
+        servers=[ServerConfig(name="a", command="cat", port=1)],
+    )
+    problems = auth_problems(config)
+    assert problems and "a" in problems[0] and "missing" in problems[0]
+
+
+def test_enforce_with_loose_token_is_refused(tmp_path: Path) -> None:
+    config = ProxyConfig(
+        auth="enforce",
+        token_file=_tok(tmp_path / "tok", mode=0o644),
+        servers=[ServerConfig(name="a", command="cat", port=1)],
+    )
+    assert auth_problems(config)
+
+
+def test_audit_and_off_start_without_a_token(tmp_path: Path) -> None:
+    for mode in ("audit", "off"):
+        config = ProxyConfig(
+            auth=mode,
+            token_file=tmp_path / "none",
+            servers=[ServerConfig(name="a", command="cat", port=1)],
+        )
+        assert auth_problems(config) == []
+
+
+def test_per_server_enforce_is_checked_even_if_default_is_audit(tmp_path: Path) -> None:
+    config = ProxyConfig(
+        auth="audit",
+        token_file=tmp_path / "none",
+        servers=[ServerConfig(name="a", command="cat", port=1, auth="enforce")],
+    )
+    assert auth_problems(config)
+
+
+def test_build_authenticators_one_per_server(tmp_path: Path) -> None:
+    config = ProxyConfig(
+        token_file=_tok(tmp_path / "tok"),
+        servers=[
+            ServerConfig(name="a", command="cat", port=1),
+            ServerConfig(name="b", command="cat", port=2, auth="enforce"),
+        ],
+    )
+    auths = build_authenticators(config)
+    assert auths["a"].mode == "audit" and auths["b"].mode == "enforce"
+    assert auths["a"].snapshot()["unauth"] == 0
+
+
+@pytest.mark.asyncio
+async def test_status_sends_the_token_and_shows_counts(tmp_path: Path, fake_script: Path, capsys) -> None:
+    from mcp_proxy.cli import check_status
+
+    port = _free_port()
+    config = ProxyConfig(
+        auth="enforce",
+        token_file=_tok(tmp_path / "tok"),
+        servers=[ServerConfig(name="fake", command=sys.executable, args=[str(fake_script)], port=port)],
+    )
+    pairs = await start_all(config)
+    try:
+        await check_status(config)
+    finally:
+        await stop_all(pairs)
+    out = capsys.readouterr().out
+    assert "ok" in out and "auth=enforce" in out and "unauth=0" in out
+    assert "PID" in out
+    assert "k" * 32 not in out

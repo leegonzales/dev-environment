@@ -9,6 +9,7 @@ import signal
 import sys
 from pathlib import Path
 
+from .auth import Authenticator, TokenStore
 from .backend import StdioBackend
 from .config import ProxyConfig, load_config
 from .server import McpHttpServer
@@ -37,6 +38,30 @@ async def _warm(backend: StdioBackend) -> None:
         logger.warning("[%s] eager initialize failed: %s", backend.name, exc)
 
 
+def auth_problems(config: ProxyConfig) -> list[str]:
+    """Reasons the proxy must not start: a server enforces auth but the
+    token file is missing, loose, or too weak. Empty when it is safe to start.
+    """
+    store = TokenStore(config.token_file)
+    problem = store.problem()
+    if problem is None:
+        return []
+    return [
+        f"[{sc.name}] auth=enforce but {problem}"
+        for sc in config.servers
+        if config.auth_for(sc) == "enforce"
+    ]
+
+
+def build_authenticators(config: ProxyConfig) -> dict[str, Authenticator]:
+    """One Authenticator per server, sharing one token store."""
+    store = TokenStore(config.token_file)
+    return {
+        sc.name: Authenticator(config.auth_for(sc), store, port=sc.port, name=sc.name)
+        for sc in config.servers
+    }
+
+
 async def start_all(config: ProxyConfig) -> list[Pair]:
     """Start every configured server, isolating failures to that server.
 
@@ -45,6 +70,7 @@ async def start_all(config: ProxyConfig) -> list[Pair]:
     server. Neither stops the rest of the proxy.
     """
     pairs: list[Pair] = []
+    auths = build_authenticators(config)
     for sc in config.servers:
         backend = StdioBackend(
             name=sc.name,
@@ -57,6 +83,7 @@ async def start_all(config: ProxyConfig) -> list[Pair]:
             host=config.host,
             port=sc.port,
             request_timeout=config.request_timeout,
+            auth=auths[sc.name],
         )
         await backend.start()
         try:
@@ -169,6 +196,12 @@ def main() -> None:
         print("no servers configured", file=sys.stderr)
         sys.exit(1)
 
+    problems = auth_problems(config)
+    if problems:
+        for p in problems:
+            print(f"error: {p}", file=sys.stderr)
+        sys.exit(2)
+
     asyncio.run(run(config))
 
 
@@ -176,7 +209,12 @@ async def check_status(config: ProxyConfig) -> None:
     """Hit /health on each configured server."""
     import aiohttp
 
-    async with aiohttp.ClientSession() as session:
+    # Send the token (if the file is usable) so an enforcing proxy shows its
+    # pid, sessions and unauthenticated-request counts. It is never printed.
+    token = TokenStore(config.token_file).read_token()
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+    async with aiohttp.ClientSession(headers=headers) as session:
         for sc in config.servers:
             url = f"http://{config.host}:{sc.port}/health"
             try:
@@ -187,9 +225,16 @@ async def check_status(config: ProxyConfig) -> None:
                     status = data.get("status", "?")
                     pid = data.get("pid", "?")
                     sessions = data.get("sessions", 0)
-                    print(
+                    line = (
                         f"  {sc.name:30s}  {status:5s}  PID {pid}  sessions={sessions}"
                     )
+                    if "auth" in data:
+                        line += f"  auth={data['auth']}"
+                        if "unauth" in data:
+                            line += f" unauth={data['unauth']}"
+                            if data.get("bad_host"):
+                                line += f" bad_host={data['bad_host']}"
+                    print(line)
             except Exception:
                 print(f"  {sc.name:30s}  DOWN   (not reachable on port {sc.port})")
 
