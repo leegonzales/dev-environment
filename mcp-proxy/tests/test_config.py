@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from mcp_proxy.config import load_config
 
 
@@ -71,3 +73,53 @@ def test_load_minimal_config(tmp_path: Path) -> None:
     assert len(config.servers) == 1
     assert config.servers[0].name == "echo"
     assert config.servers[0].port == 9999
+
+
+# ── auth settings ────────────────────────────────────────
+
+
+def test_auth_defaults_to_audit(tmp_path: Path) -> None:
+    toml = tmp_path / "t.toml"
+    toml.write_text('[servers.echo]\ncommand = "cat"\nport = 9999\n')
+    config = load_config(toml)
+    assert config.auth == "audit"
+    assert config.token_file == Path("~/.config/mcp-proxy/token").expanduser()
+    assert config.servers[0].auth is None
+
+
+def test_auth_modes_and_per_server_override(tmp_path: Path) -> None:
+    toml = tmp_path / "t.toml"
+    toml.write_text(
+        '[proxy]\nauth = "enforce"\ntoken_file = "~/x/tok"\n\n'
+        '[servers.a]\ncommand = "cat"\nport = 9998\n\n'
+        '[servers.b]\ncommand = "cat"\nport = 9999\nauth = "off"\n'
+    )
+    config = load_config(toml)
+    assert config.auth == "enforce"
+    assert config.token_file == Path("~/x/tok").expanduser()
+    assert config.auth_for(config.servers[0]) == "enforce"
+    assert config.auth_for(config.servers[1]) == "off"
+
+
+@pytest.mark.parametrize("bad", ["enforse", "on", "", "ENFORCE"])
+def test_bad_auth_mode_fails_loudly(tmp_path: Path, bad: str) -> None:
+    toml = tmp_path / "t.toml"
+    toml.write_text(f'[proxy]\nauth = "{bad}"\n\n[servers.a]\ncommand = "cat"\nport = 9999\n')
+    with pytest.raises(ValueError, match="auth"):
+        load_config(toml)
+
+
+def test_bad_per_server_auth_mode_fails_loudly(tmp_path: Path) -> None:
+    toml = tmp_path / "t.toml"
+    toml.write_text('[servers.a]\ncommand = "cat"\nport = 9999\nauth = "nope"\n')
+    with pytest.raises(ValueError, match="auth"):
+        load_config(toml)
+
+
+def test_relative_token_file_is_rejected(tmp_path: Path) -> None:
+    toml = tmp_path / "t.toml"
+    toml.write_text(
+        '[proxy]\ntoken_file = "token"\n\n[servers.a]\ncommand = "cat"\nport = 9999\n'
+    )
+    with pytest.raises(ValueError, match="token_file"):
+        load_config(toml)
