@@ -9,6 +9,9 @@
 [proxy]
 host = "127.0.0.1"
 request_timeout = 120  # seconds — some tool calls (image/video gen) are slow
+# Token auth (AUTH.md). enforce: no valid bearer token -> 401, foreign Host -> 421.
+# Rollback: "audit" (count only) or "off", then restart the proxy.
+auth = "enforce"
 
 # ── Servers ─────────────────────────────────────────────
 
